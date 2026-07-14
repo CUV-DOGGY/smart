@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from app.schemas.chat import ChatRequest, ChatResponse
 
 router = APIRouter(prefix="/chat", tags=["外卖智能客服"])
 

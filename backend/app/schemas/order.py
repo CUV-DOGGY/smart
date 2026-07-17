@@ -12,14 +12,17 @@ class OrderItem(BaseModel):
     price: float = Field(ge=0)
 
 
-class Order(BaseModel):
-    """订单"""
+class OrderCreateResponse(BaseModel):
+    """创建订单响应"""
+    status: str
+    message: str
+    order_id: str
+    order_status: OrderStatus
+
+
+class OrderCreate(BaseModel):
+    """创建订单"""
     user_id: str
     shop_id: str
-    order_id: str | None = None  # 由服务层自动生成
     items: List[OrderItem]
-    order_status: OrderStatus = Field(default=OrderStatus.PENDING_PAYMENT)
     delivery_address: str = Field(min_length=1)
-    create_time: datetime = Field(default_factory=datetime.now)
-    finish_time: datetime | None = None
-    total_price: float = Field(ge=0)

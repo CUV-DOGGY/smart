@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends
-from app.schemas.order import Order
+from app.schemas.order import OrderCreate, OrderCreateResponse
 from app.services.order_services import OrderServices
 from app.repositories.order_repository import OrderRepository
 from app.dependencies.database import get_db
@@ -15,9 +15,9 @@ def get_order_service(repository: OrderRepository = Depends(get_order_repository
     return OrderServices(repository)
 
 
-@router.post("/create")
+@router.post("/create", response_model=OrderCreateResponse)
 async def create_order(
-    order: Order,
+    order: OrderCreate,
     service: OrderServices = Depends(get_order_service),
 ):
     return await service.create_order(order)

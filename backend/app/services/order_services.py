@@ -1,5 +1,5 @@
 from app.repositories.order_repository import OrderRepository
-from app.schemas.order import OrderCreate, OrderCreateResponse
+from app.schemas.order import OrderCreate, OrderCreateResponse, OrderQueryByIdResponse, OrderQueryByIdData
 from app.contants.order_status import OrderStatus
 import uuid
 from datetime import datetime
@@ -26,3 +26,17 @@ class OrderServices:
             order_id=order_data["order_id"],
             order_status=order_data["order_status"],
         )
+
+    async def query_order_by_id(self, order_id: str, user_id: str):
+        result = await self.repository.query_order_by_id(order_id, user_id)
+        if result is None:
+            return OrderQueryByIdResponse(
+                status="error",
+                message="Order not found",
+                order=None,
+            )
+        return OrderQueryByIdResponse(
+            status="success",
+            message="Order queried successfully",
+            order=OrderQueryByIdData(**result)        
+            )

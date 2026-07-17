@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends
-from app.schemas.order import OrderCreate, OrderCreateResponse
+from fastapi import APIRouter, Depends, Query
+from app.schemas.order import OrderCreate, OrderCreateResponse, OrderQueryByIdResponse
 from app.services.order_services import OrderServices
 from app.repositories.order_repository import OrderRepository
 from app.dependencies.database import get_db
@@ -21,3 +21,12 @@ async def create_order(
     service: OrderServices = Depends(get_order_service),
 ):
     return await service.create_order(order)
+
+
+@router.get("/query_order_by_id", response_model=OrderQueryByIdResponse)
+async def query_order_by_id(
+    order_id: str = Query(..., min_length=1, description="订单ID"),
+    user_id: str = Query(..., min_length=1, description="用户ID"),
+    service: OrderServices = Depends(get_order_service),
+):
+    return await service.query_order_by_id(order_id, user_id)

@@ -57,11 +57,11 @@ async def lifespan(app: FastAPI):
     app.state.db = db
     logger.info("MongoDB 连接成功")
 
-    # 2. 连接 Redis
-    logger.info("连接 Redis...")
-    redis_client = await startup_redis()
-    app.state.redis = redis_client
-    logger.info("Redis 连接成功")
+    # # 2. 连接 Redis
+    # logger.info("连接 Redis...")
+    # redis_client = await startup_redis()
+    # app.state.redis = redis_client
+    # logger.info("Redis 连接成功")
 
     # 3. 创建 LLM
     logger.info("初始化 LLM...")
@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI):
 
     # 关闭时断开连接
     await shutdown_db(app.state.mongo_client)
-    await shutdown_redis(app.state.redis)
+    # await shutdown_redis(app.state.redis)
 
     logger.info("应用已关闭")
     logger.info("=" * 30)

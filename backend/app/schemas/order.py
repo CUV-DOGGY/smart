@@ -16,7 +16,7 @@ class Order(BaseModel):
     """订单"""
     user_id: str
     shop_id: str
-    order_id: str = Field(min_length=1)
+    order_id: str | None = None  # 由服务层自动生成
     items: List[OrderItem]
     order_status: OrderStatus = Field(default=OrderStatus.PENDING_PAYMENT)
     delivery_address: str = Field(min_length=1)

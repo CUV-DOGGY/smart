@@ -45,3 +45,38 @@ class OrderQueryByIdResponse(BaseModel):
     status: str
     message: str
     order: OrderQueryByIdData|None = None
+ 
+ 
+class OrderStatusQueryResponse(BaseModel):
+    """查询订单状态响应"""
+    status: str
+    message: str
+    order_status: OrderStatus|None = None
+
+class OrderHistoryItem(BaseModel):
+    """订单历史项"""
+    order_id: str = Field(min_length=1)
+    shop_id: str = Field(min_length=1)
+    items: List[OrderItem]
+    order_status: str
+    create_time: datetime
+    total_price: float = Field(ge=0)
+
+class OrderHistoryQueryResponse(BaseModel):
+    """查询历史订单响应"""
+    status: str
+    message: str
+    orders: List[OrderHistoryItem]
+
+
+class OrderCancelRequest(BaseModel):
+    """取消订单请求"""
+    order_id: str = Field(min_length=1, description="订单ID")
+    user_id: str = Field(min_length=1, description="用户ID")
+
+
+class OrderCancelResponse(BaseModel):
+    """取消订单响应"""
+    status: str
+    message: str
+    order_status: OrderStatus | None = None

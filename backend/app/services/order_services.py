@@ -1,6 +1,9 @@
 from app.repositories.order_repository import OrderRepository
-from app.schemas.order import OrderCreate, OrderCreateResponse, OrderQueryByIdResponse, OrderQueryByIdData
-from app.contants.order_status import OrderStatus
+from app.schemas.order import (
+    OrderCreate, OrderCreateResponse, OrderQueryByIdResponse, OrderQueryByIdData,
+    OrderStatusQueryResponse, OrderHistoryQueryResponse, OrderHistoryItem, OrderCancelResponse
+)
+from app.contants.order_status import OrderStatus, can_transition
 import uuid
 from datetime import datetime
 
@@ -38,5 +41,56 @@ class OrderServices:
         return OrderQueryByIdResponse(
             status="success",
             message="Order queried successfully",
-            order=OrderQueryByIdData(**result)        
+            order=OrderQueryByIdData(**result)
+        )
+
+    async def query_order_status(self, order_id: str, user_id: str):
+        result = await self.repository.query_order_status(order_id, user_id)
+        if result is None:
+            return OrderStatusQueryResponse(
+                status="error",
+                message="Order not found",
+                order_status=None,
             )
+        return OrderStatusQueryResponse(
+            status="success",
+            message="Order status queried successfully",
+            order_status=OrderStatus(result["order_status"]),
+        )
+
+    async def query_order_history(self, user_id: str):
+        result = await self.repository.query_order_history(user_id)
+        return OrderHistoryQueryResponse(
+            status="success",
+            message="Order history queried successfully",
+            orders=[OrderHistoryItem(**order) for order in result],
+        )
+
+    async def cancel_order(self, order_id: str, user_id: str):
+        result = await self.repository.query_order_status(order_id, user_id)
+        if result is None:
+            return OrderCancelResponse(
+                status="error",
+                message="Order not found",
+                order_status=None
+            )
+        current_status = OrderStatus(result["order_status"])
+        if not can_transition(current_status, OrderStatus.CANCELING):
+            return OrderCancelResponse(
+                status="error",
+                message="Current order status cannot be canceled",
+                order_status=current_status
+            )
+        success = await self.repository.cancel_order(order_id, user_id, OrderStatus.CANCELING.value)
+        if not success:
+            return OrderCancelResponse(
+                status="error",
+                message="Failed to cancel order",
+                order_status=current_status
+            )
+        return OrderCancelResponse(
+            status="success",
+            message="Order cancellation request successful",
+            order_status=OrderStatus.CANCELING,
+        )
+   

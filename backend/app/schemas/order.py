@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import List
 from datetime import datetime
-from app.contants.order_status import OrderStatus, can_transition
+from app.contants.order_status import OrderStatus
 
 
 class OrderItem(BaseModel):
@@ -20,7 +20,6 @@ class OrderCreateResponse(BaseModel):
 
 class OrderCreate(BaseModel):
     """创建订单"""
-    user_id: str = Field(min_length=1)
     shop_id: str = Field(min_length=1)
     items: List[OrderItem]
     delivery_address: str = Field(min_length=1)
@@ -72,7 +71,6 @@ class OrderHistoryQueryResponse(BaseModel):
 class OrderCancelRequest(BaseModel):
     """取消订单请求"""
     order_id: str = Field(min_length=1, description="订单ID")
-    user_id: str = Field(min_length=1, description="用户ID")
 
 
 class OrderCancelResponse(BaseModel):

@@ -1,4 +1,7 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query
+from app.dependencies.auth import get_current_user_id
 from app.schemas.order import (
     OrderCreate, OrderCreateResponse, OrderQueryByIdResponse,
     OrderStatusQueryResponse, OrderHistoryQueryResponse,
@@ -22,15 +25,16 @@ def get_order_service(repository: OrderRepository = Depends(get_order_repository
 @router.post("/create", response_model=OrderCreateResponse)
 async def create_order(
     order: OrderCreate,
+    user_id: Annotated[str, Depends(get_current_user_id)],
     service: OrderServices = Depends(get_order_service),
 ):
-    return await service.create_order(order)
+    return await service.create_order(order, user_id)
 
 
 @router.get("/query_order_by_id", response_model=OrderQueryByIdResponse)
 async def query_order_by_id(
+    user_id: Annotated[str, Depends(get_current_user_id)],
     order_id: str = Query(..., min_length=1, description="订单ID"),
-    user_id: str = Query(..., min_length=1, description="用户ID"),
     service: OrderServices = Depends(get_order_service),
 ):
     return await service.query_order_by_id(order_id, user_id)
@@ -38,15 +42,15 @@ async def query_order_by_id(
 
 @router.get("/query_order_status", response_model=OrderStatusQueryResponse)
 async def query_order_status(
+    user_id: Annotated[str, Depends(get_current_user_id)],
     order_id: str = Query(..., min_length=1, description="订单ID"),
-    user_id: str = Query(..., min_length=1, description="用户ID"),
     service: OrderServices = Depends(get_order_service),
 ):
     return await service.query_order_status(order_id, user_id)
 
 @router.get("/query_order_history", response_model=OrderHistoryQueryResponse)
 async def query_order_history(
-    user_id: str = Query(..., min_length=1, description="用户ID"),
+    user_id: Annotated[str, Depends(get_current_user_id)],
     service: OrderServices = Depends(get_order_service),
 ):
     return await service.query_order_history(user_id)
@@ -55,6 +59,7 @@ async def query_order_history(
 @router.post("/cancel_order", response_model=OrderCancelResponse)
 async def cancel_order(
     request: OrderCancelRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
     service: OrderServices = Depends(get_order_service),
 ):
-    return await service.cancel_order(request.order_id, request.user_id)
+    return await service.cancel_order(request.order_id, user_id)

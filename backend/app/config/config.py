@@ -1,4 +1,4 @@
-import os
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +14,13 @@ class Settings(BaseSettings):
 
     # Redis 配置
     REDIS_URL: str = "redis://localhost:6379"
+
+    # JWT 配置
+    JWT_SECRET_KEY: str = Field(min_length=32)
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ISSUER: str = "smart-customer-service"
+    JWT_AUDIENCE: str = "smart-customer-service-api"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=1, le=1440)
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -1,8 +1,11 @@
 from app.core import Logger, setup_middleware, lifespan
 from app.schemas.chat import ChatRequest, ChatResponse
+from app.dependencies.auth import get_current_user_id
+from app.routers.auth_router import router as auth_router
 from app.routers.order_router import router as order_router
 import logging
-from fastapi import FastAPI
+from typing import Annotated
+from fastapi import Depends, FastAPI
 
 logger = logging.getLogger(__name__)
 
@@ -15,11 +18,15 @@ app = FastAPI(
 )
 
 setup_middleware(app)
+app.include_router(auth_router)
 app.include_router(order_router)
 
 
 # ==================== Routes ====================
 @app.post("/chat", response_model=ChatResponse, tags=["外卖智能客服"])
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+):
     """智能客服聊天接口"""
     pass

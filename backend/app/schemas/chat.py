@@ -1,8 +1,6 @@
 from pydantic import BaseModel, Field
 
 class ChatRequest(BaseModel):
-    #用户id
-   user_id : str = Field(min_length=1)
    #会话id
    session_id : str = Field(min_length=1)
    #用户消息
@@ -11,6 +9,6 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
    #机器人回复
-   response : str 
+   response : str
    #会话id
-   session_id : str 
+   session_id : str

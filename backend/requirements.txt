@@ -1,6 +1,9 @@
 fastapi
 uvicorn
 pydantic-settings
+PyJWT
+pwdlib[argon2]
+python-multipart
 langchain-openai
 motor
 redis

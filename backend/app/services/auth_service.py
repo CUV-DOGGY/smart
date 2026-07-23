@@ -1,7 +1,17 @@
 import uuid
 from datetime import datetime, timezone
 
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.auth_policy import (
+    is_valid_normalized_username,
+    is_valid_password_size,
+    normalize_username,
+)
+from app.core.security import (
+    create_access_token,
+    get_dummy_password_hash,
+    hash_password,
+    verify_password,
+)
 from app.repositories.auth_repository import AuthRepository, UsernameConflictError
 from app.schemas.auth import RegisterRequest, RegisterResponse, TokenResponse
 
@@ -14,12 +24,15 @@ class AuthenticationError(RuntimeError):
     """用户名、密码或用户状态不允许登录。"""
 
 
+INVALID_PASSWORD_PLACEHOLDER = "invalid-login-input-for-dummy-hash"
+
+
 class AuthService:
     def __init__(self, repository: AuthRepository):
         self.repository = repository
 
     async def register(self, request: RegisterRequest) -> RegisterResponse:
-        username = request.username.strip().lower()
+        username = normalize_username(request.username)
         existing_user = await self.repository.find_by_username(username)
         if existing_user is not None:
             raise UsernameAlreadyExistsError("用户名已经存在")
@@ -28,7 +41,7 @@ class AuthService:
         user_data = {
             "user_id": user_id,
             "username": username,
-            "password_hash": hash_password(request.password),
+            "password_hash": await hash_password(request.password),
             "disabled": False,
             "create_time": datetime.now(timezone.utc),
         }
@@ -46,14 +59,32 @@ class AuthService:
         )
 
     async def login(self, username: str, password: str) -> TokenResponse:
-        normalized_username = username.strip().lower()
-        user = await self.repository.find_by_username(normalized_username)
+        normalized_username = normalize_username(username)
+        username_is_valid = is_valid_normalized_username(normalized_username)
+        password_is_valid = is_valid_password_size(password)
 
-        # 不区分“用户名不存在”和“密码错误”，避免泄露已注册用户名。
-        if user is None:
-            raise AuthenticationError("用户名或密码错误")
+        # 非法或超长用户名不进入数据库，但仍然执行一次假 Argon2。
+        user = (
+            await self.repository.find_by_username(normalized_username)
+            if username_is_valid
+            else None
+        )
 
-        if not verify_password(password, user["password_hash"]):
+        # 用户不存在时也验证固定假哈希，降低响应时间差造成的用户名枚举。
+        stored_password_hash = (
+            user["password_hash"]
+            if user is not None and password_is_valid
+            else get_dummy_password_hash()
+        )
+        password_candidate = (
+            password if password_is_valid else INVALID_PASSWORD_PLACEHOLDER
+        )
+        password_matched = await verify_password(
+            password_candidate,
+            stored_password_hash,
+        )
+
+        if user is None or not password_is_valid or not password_matched:
             raise AuthenticationError("用户名或密码错误")
 
         if user.get("disabled", False):

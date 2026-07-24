@@ -1,7 +1,16 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List
 from datetime import datetime
 from app.contants.order_status import OrderStatus
+
+
+class OrderCreateItem(BaseModel):
+    """客户端提交的订单商品，只表达购买意图。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    food_id: str = Field(min_length=1, max_length=64)
+    quantity: int = Field(ge=1)
 
 
 class OrderItem(BaseModel):
@@ -20,9 +29,12 @@ class OrderCreateResponse(BaseModel):
 
 class OrderCreate(BaseModel):
     """创建订单"""
-    shop_id: str = Field(min_length=1)
-    items: List[OrderItem]
-    delivery_address: str = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+    shop_id: str = Field(min_length=1, max_length=64)
+    items: List[OrderCreateItem] = Field(min_length=1, max_length=50)
+    delivery_address: str = Field(min_length=1, max_length=500)
 
 
 class OrderQueryByIdData(BaseModel):

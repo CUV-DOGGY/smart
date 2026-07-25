@@ -7,3 +7,4 @@ python-multipart
 langchain-openai
 motor
 redis
+httpx

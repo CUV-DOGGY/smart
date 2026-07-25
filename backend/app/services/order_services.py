@@ -20,6 +20,7 @@ from app.schemas.order import (
 )
 from app.schemas.product import Product
 from app.schemas.shop import Shop
+from app.services.delivery_location_service import DeliveryLocationService
 
 
 class ShopNotFoundError(RuntimeError):
@@ -60,11 +61,13 @@ class OrderServices:
         repository: OrderRepository,
         product_repository: ProductRepository,
         shop_repository: ShopRepository,
+        delivery_location_service: DeliveryLocationService,
         now_provider: Callable[[], datetime] | None = None,
     ):
         self.repository = repository
         self.product_repository = product_repository
         self.shop_repository = shop_repository
+        self.delivery_location_service = delivery_location_service
         self.now_provider = now_provider or (
             lambda: datetime.now(timezone.utc)
         )
@@ -81,12 +84,37 @@ class OrderServices:
         if create_time.tzinfo is None:
             raise RuntimeError("now_provider must return a timezone-aware datetime")
 
+        preliminary_shop = await self.shop_repository.find_by_shop_id(
+            order.shop_id
+        )
+        self._validate_shop(preliminary_shop, create_time)
+        self.delivery_location_service.validate_shop_configuration(
+            preliminary_shop
+        )
+        resolved_delivery_location = (
+            await self.delivery_location_service.resolve(
+                order.delivery_address
+            )
+        )
+        self.delivery_location_service.build_snapshot(
+            address=order.delivery_address,
+            resolved=resolved_delivery_location,
+            shop=preliminary_shop,
+        )
+
         async def create_in_transaction(session):
             shop = await self.shop_repository.find_by_shop_id(
                 order.shop_id,
                 session=session,
             )
             self._validate_shop(shop, create_time)
+            delivery_snapshot = (
+                self.delivery_location_service.build_snapshot(
+                    address=order.delivery_address,
+                    resolved=resolved_delivery_location,
+                    shop=shop,
+                )
+            )
 
             products = (
                 await self.product_repository.find_by_shop_and_food_ids(
@@ -143,7 +171,7 @@ class OrderServices:
                 "items": order_items,
                 "order_status": OrderStatus.PENDING_PAYMENT.value,
                 "create_time": create_time.astimezone(timezone.utc),
-                "delivery_address": order.delivery_address,
+                "delivery_address": delivery_snapshot.model_dump(),
                 "goods_amount": goods_amount,
                 "delivery_fee": delivery_fee,
                 "total_price": total_price,
@@ -160,6 +188,9 @@ class OrderServices:
                 goods_amount=goods_amount,
                 delivery_fee=delivery_fee,
                 total_price=total_price,
+                delivery_distance_meters=(
+                    delivery_snapshot.distance_meters
+                ),
             )
 
         return await self.repository.run_in_transaction(

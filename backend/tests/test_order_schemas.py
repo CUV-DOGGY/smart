@@ -5,6 +5,14 @@ from pydantic import ValidationError
 from app.schemas.order import OrderCreate
 
 
+DELIVERY_ADDRESS = {
+    "province": "北京市",
+    "city": "北京市",
+    "district": "朝阳区",
+    "detail_address": "测试路1号",
+}
+
+
 class OrderCreateSchemaTests(unittest.TestCase):
     def test_accepts_single_shop_items_without_client_prices(self):
         order = OrderCreate(
@@ -13,7 +21,7 @@ class OrderCreateSchemaTests(unittest.TestCase):
                 {"food_id": "food-001", "quantity": 2},
                 {"food_id": "food-002", "quantity": 1},
             ],
-            delivery_address="北京市朝阳区",
+            delivery_address=DELIVERY_ADDRESS,
         )
 
         self.assertEqual(order.shop_id, "shop-001")
@@ -31,7 +39,7 @@ class OrderCreateSchemaTests(unittest.TestCase):
                         "price": 0,
                     }
                 ],
-                delivery_address="北京市朝阳区",
+                delivery_address=DELIVERY_ADDRESS,
             )
 
     def test_rejects_empty_items(self):
@@ -39,14 +47,14 @@ class OrderCreateSchemaTests(unittest.TestCase):
             OrderCreate(
                 shop_id="shop-001",
                 items=[],
-                delivery_address="北京市朝阳区",
+                delivery_address=DELIVERY_ADDRESS,
             )
 
     def test_quantity_has_no_fixed_upper_limit(self):
         order = OrderCreate(
             shop_id="shop-001",
             items=[{"food_id": "food-001", "quantity": 1000}],
-            delivery_address="北京市朝阳区",
+            delivery_address=DELIVERY_ADDRESS,
         )
 
         self.assertEqual(order.items[0].quantity, 1000)

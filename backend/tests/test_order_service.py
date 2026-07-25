@@ -1,9 +1,11 @@
 import unittest
 from datetime import datetime, time, timezone
 
+from app.schemas.delivery import GeocodingResult
 from app.schemas.order import OrderCreate
 from app.schemas.product import Product
 from app.schemas.shop import Shop
+from app.services.delivery_location_service import DeliveryLocationService
 from app.services.order_services import (
     InsufficientStockError,
     InventoryReservationError,
@@ -18,6 +20,30 @@ from app.services.order_services import (
 
 
 TEST_NOW = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
+
+
+class FakeAmapService:
+    async def geocode(self, address):
+        return GeocodingResult(
+            longitude=116.001,
+            latitude=39.0,
+            formatted_address=address.full_address(),
+            province=address.province,
+            city=address.city,
+            district=address.district,
+            adcode="110105",
+        )
+
+    async def reverse_geocode(self, *, longitude: float, latitude: float):
+        return GeocodingResult(
+            longitude=longitude,
+            latitude=latitude,
+            formatted_address="Test formatted address",
+            province="北京市",
+            city="北京市",
+            district="朝阳区",
+            adcode="110105",
+        )
 
 
 class FakeOrderRepository:
@@ -115,6 +141,9 @@ def make_shop(**overrides) -> Shop:
         ],
         "minimum_order_amount": 20.0,
         "delivery_fee": 5.0,
+        "longitude": 116.0,
+        "latitude": 39.0,
+        "delivery_radius_meters": 5000,
     }
     shop_data.update(overrides)
     return Shop(**shop_data)
@@ -124,7 +153,12 @@ def make_order(items: list[dict] | None = None) -> OrderCreate:
     return OrderCreate(
         shop_id="shop-001",
         items=items or [{"food_id": "food-001", "quantity": 2}],
-        delivery_address="Test address",
+        delivery_address={
+            "province": "北京市",
+            "city": "北京市",
+            "district": "朝阳区",
+            "detail_address": "Test address",
+        },
     )
 
 
@@ -148,6 +182,7 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
             order_repository,
             product_repository,
             shop_repository,
+            DeliveryLocationService(FakeAmapService()),
             now_provider=lambda: TEST_NOW,
         )
         return (
@@ -168,6 +203,7 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.goods_amount, 25.0)
         self.assertEqual(response.delivery_fee, 5.0)
         self.assertEqual(response.total_price, 30.0)
+        self.assertGreater(response.delivery_distance_meters, 0)
         self.assertEqual(order_repository.transaction_count, 1)
         self.assertEqual(shop_repository.requested_shop_id, "shop-001")
         self.assertEqual(
@@ -200,6 +236,12 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             order_repository.created_order["total_price"],
             30.0,
+        )
+        self.assertEqual(
+            order_repository.created_order["delivery_address"][
+                "location_source"
+            ],
+            "geocoded",
         )
 
     async def test_rejects_missing_shop(self):

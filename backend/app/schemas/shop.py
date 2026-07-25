@@ -1,6 +1,8 @@
-from datetime import time
+from datetime import datetime, time
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.schemas.delivery import StructuredAddress
 
 
 class ShopBusinessHours(BaseModel):
@@ -26,3 +28,28 @@ class Shop(BaseModel):
     business_hours: list[ShopBusinessHours] = Field(min_length=1)
     minimum_order_amount: float = Field(ge=0, allow_inf_nan=False)
     delivery_fee: float = Field(ge=0, allow_inf_nan=False)
+    address: StructuredAddress | None = None
+    longitude: float | None = Field(
+        default=None,
+        ge=-180,
+        le=180,
+        allow_inf_nan=False,
+    )
+    latitude: float | None = Field(
+        default=None,
+        ge=-90,
+        le=90,
+        allow_inf_nan=False,
+    )
+    adcode: str | None = Field(default=None, max_length=16)
+    formatted_address: str | None = Field(default=None, max_length=500)
+    delivery_radius_meters: int | None = Field(default=None, gt=0)
+    location_updated_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def validate_coordinate_pair(self):
+        if (self.longitude is None) != (self.latitude is None):
+            raise ValueError(
+                "shop longitude and latitude must be provided together"
+            )
+        return self

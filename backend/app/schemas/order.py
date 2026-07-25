@@ -2,6 +2,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing import List
 from datetime import datetime
 from app.contants.order_status import OrderStatus
+from app.schemas.delivery import (
+    DeliveryAddressInput,
+    DeliveryLocationSnapshot,
+)
 
 
 class OrderCreateItem(BaseModel):
@@ -29,6 +33,7 @@ class OrderCreateResponse(BaseModel):
     goods_amount: float = Field(ge=0, allow_inf_nan=False)
     delivery_fee: float = Field(ge=0, allow_inf_nan=False)
     total_price: float = Field(ge=0, allow_inf_nan=False)
+    delivery_distance_meters: int = Field(ge=0)
 
 class OrderCreate(BaseModel):
     """创建订单"""
@@ -37,7 +42,7 @@ class OrderCreate(BaseModel):
 
     shop_id: str = Field(min_length=1, max_length=64)
     items: List[OrderCreateItem] = Field(min_length=1, max_length=50)
-    delivery_address: str = Field(min_length=1, max_length=500)
+    delivery_address: DeliveryAddressInput
 
 
 class OrderQueryByIdData(BaseModel):
@@ -47,7 +52,7 @@ class OrderQueryByIdData(BaseModel):
     shop_id: str = Field(min_length=1)
     items: List[OrderItem]
     order_status: OrderStatus
-    delivery_address: str = Field(min_length=1)
+    delivery_address: DeliveryLocationSnapshot | str
     create_time: datetime 
     finish_time: datetime | None = None
     cancel_time: datetime | None = None

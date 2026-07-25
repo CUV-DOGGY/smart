@@ -27,6 +27,13 @@ class ShopRepository:
                 "business_hours": 1,
                 "minimum_order_amount": 1,
                 "delivery_fee": 1,
+                "address": 1,
+                "longitude": 1,
+                "latitude": 1,
+                "adcode": 1,
+                "formatted_address": 1,
+                "delivery_radius_meters": 1,
+                "location_updated_at": 1,
             },
             session=session,
         )

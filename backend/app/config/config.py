@@ -1,6 +1,6 @@
 import ipaddress
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,18 @@ class Settings(BaseSettings):
     REDIS_CONNECT_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0, le=30)
     REDIS_SOCKET_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0, le=30)
     REDIS_HEALTH_CHECK_INTERVAL_SECONDS: int = Field(default=30, ge=0, le=300)
+
+    # 高德 Web 服务
+    AMAP_WEB_SERVICE_KEY: SecretStr
+    AMAP_CONNECT_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0, le=30)
+    AMAP_READ_TIMEOUT_SECONDS: float = Field(default=3.0, gt=0, le=30)
+    AMAP_MAX_RETRIES: int = Field(default=1, ge=0, le=3)
+    AMAP_GEOCODE_CACHE_SECONDS: int = Field(default=86400, ge=60)
+    ORDER_GEOCODE_RATE_LIMIT_BY_USER: int = Field(default=30, ge=1)
+    ORDER_GEOCODE_RATE_LIMIT_WINDOW_SECONDS: int = Field(
+        default=300,
+        ge=1,
+    )
 
     # 认证限流配置
     LOGIN_RATE_LIMIT_GLOBAL: int = Field(default=100, ge=1)

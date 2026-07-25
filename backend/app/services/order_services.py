@@ -1,10 +1,13 @@
 import math
 import uuid
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.contants.order_status import OrderStatus, can_transition
 from app.repositories.order_repository import OrderRepository
 from app.repositories.product_repository import ProductRepository
+from app.repositories.shop_repository import ShopRepository
 from app.schemas.order import (
     OrderCancelResponse,
     OrderCreate,
@@ -14,16 +17,25 @@ from app.schemas.order import (
     OrderQueryByIdData,
     OrderQueryByIdResponse,
     OrderStatusQueryResponse,
-    Product,
 )
+from app.schemas.product import Product
+from app.schemas.shop import Shop
+
+
+class ShopNotFoundError(RuntimeError):
+    """请求中的店铺不存在。"""
+
+
+class ShopUnavailableError(RuntimeError):
+    """店铺已停用或当前停止接单。"""
+
+
+class ShopClosedError(RuntimeError):
+    """当前时间不在店铺营业时间内。"""
 
 
 class ProductNotFoundError(RuntimeError):
     """订单中的商品不存在。"""
-
-
-class ProductShopMismatchError(RuntimeError):
-    """订单中的商品不属于请求指定的店铺。"""
 
 
 class ProductUnavailableError(RuntimeError):
@@ -34,14 +46,28 @@ class InsufficientStockError(RuntimeError):
     """订单中的商品库存不足。"""
 
 
+class MinimumOrderAmountError(RuntimeError):
+    """商品金额未达到店铺最低起送金额。"""
+
+
+class InventoryReservationError(RuntimeError):
+    """商品状态或库存发生并发变化，库存预占失败。"""
+
+
 class OrderServices:
     def __init__(
         self,
         repository: OrderRepository,
         product_repository: ProductRepository,
+        shop_repository: ShopRepository,
+        now_provider: Callable[[], datetime] | None = None,
     ):
         self.repository = repository
         self.product_repository = product_repository
+        self.shop_repository = shop_repository
+        self.now_provider = now_provider or (
+            lambda: datetime.now(timezone.utc)
+        )
 
     async def create_order(self, order: OrderCreate, user_id: str):
         requested_quantities: dict[str, int] = {}
@@ -50,51 +76,151 @@ class OrderServices:
                 requested_quantities.get(item.food_id, 0) + item.quantity
             )
 
-        products = await self.product_repository.find_by_food_ids(
-            list(requested_quantities)
-        )
-        products_by_id = {product.food_id: product for product in products}
-        self._validate_products(
-            requested_quantities=requested_quantities,
-            products_by_id=products_by_id,
-            shop_id=order.shop_id,
+        order_id = str(uuid.uuid4())
+        create_time = self.now_provider()
+        if create_time.tzinfo is None:
+            raise RuntimeError("now_provider must return a timezone-aware datetime")
+
+        async def create_in_transaction(session):
+            shop = await self.shop_repository.find_by_shop_id(
+                order.shop_id,
+                session=session,
+            )
+            self._validate_shop(shop, create_time)
+
+            products = (
+                await self.product_repository.find_by_shop_and_food_ids(
+                    order.shop_id,
+                    list(requested_quantities),
+                    session=session,
+                )
+            )
+            products_by_id = {
+                product.food_id: product for product in products
+            }
+            self._validate_products(
+                requested_quantities=requested_quantities,
+                products_by_id=products_by_id,
+            )
+
+            order_items = []
+            for food_id, quantity in requested_quantities.items():
+                product = products_by_id[food_id]
+                order_items.append({
+                    "food_id": product.food_id,
+                    "food_name": product.food_name,
+                    "quantity": quantity,
+                    "price": product.price,
+                })
+
+            goods_amount = math.fsum(
+                item["price"] * item["quantity"] for item in order_items
+            )
+            if goods_amount < shop.minimum_order_amount:
+                raise MinimumOrderAmountError(
+                    "Order amount does not meet the shop minimum"
+                )
+
+            delivery_fee = shop.delivery_fee
+            total_price = math.fsum([goods_amount, delivery_fee])
+
+            for food_id, quantity in requested_quantities.items():
+                reserved = await self.product_repository.reserve_stock(
+                    product=products_by_id[food_id],
+                    quantity=quantity,
+                    session=session,
+                )
+                if not reserved:
+                    raise InventoryReservationError(
+                        f"Failed to reserve stock for product {food_id}"
+                    )
+
+            order_data = {
+                "order_id": order_id,
+                "user_id": user_id,
+                "shop_id": shop.shop_id,
+                "shop_name": shop.shop_name,
+                "items": order_items,
+                "order_status": OrderStatus.PENDING_PAYMENT.value,
+                "create_time": create_time.astimezone(timezone.utc),
+                "delivery_address": order.delivery_address,
+                "goods_amount": goods_amount,
+                "delivery_fee": delivery_fee,
+                "total_price": total_price,
+            }
+            await self.repository.create_order(
+                order_data,
+                session=session,
+            )
+            return OrderCreateResponse(
+                status="success",
+                message="Order created successfully",
+                order_id=order_id,
+                order_status=OrderStatus.PENDING_PAYMENT,
+                goods_amount=goods_amount,
+                delivery_fee=delivery_fee,
+                total_price=total_price,
+            )
+
+        return await self.repository.run_in_transaction(
+            create_in_transaction
         )
 
-        order_items = []
-        for food_id, quantity in requested_quantities.items():
-            product = products_by_id[food_id]
-            order_items.append({
-                "food_id": product.food_id,
-                "food_name": product.food_name,
-                "quantity": quantity,
-                "price": product.price,
-            })
-        order_data = {
-            "order_id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "shop_id": order.shop_id,
-            "items": order_items,
-            "order_status": OrderStatus.PENDING_PAYMENT.value,
-            "create_time": datetime.now(timezone.utc),
-            "delivery_address": order.delivery_address,
-            "total_price": math.fsum(
-                item["price"] * item["quantity"] for item in order_items
-            ),
-        }
-        await self.repository.create_order(order_data)
-        return OrderCreateResponse(
-            status="success",
-            message="Order created successfully",
-            order_id=order_data["order_id"],
-            order_status=order_data["order_status"],
-        )
+    @classmethod
+    def _validate_shop(
+        cls,
+        shop: Shop | None,
+        current_time: datetime,
+    ) -> None:
+        if shop is None:
+            raise ShopNotFoundError("Shop not found")
+        if not shop.is_active or not shop.is_accepting_orders:
+            raise ShopUnavailableError("Shop is not accepting orders")
+        if not cls._is_within_business_hours(shop, current_time):
+            raise ShopClosedError("Shop is outside business hours")
+
+    @staticmethod
+    def _is_within_business_hours(
+        shop: Shop,
+        current_time: datetime,
+    ) -> bool:
+        try:
+            shop_timezone = ZoneInfo(shop.timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ShopUnavailableError(
+                "Shop timezone configuration is invalid"
+            ) from exc
+
+        local_time = current_time.astimezone(shop_timezone)
+        for business_period in shop.business_hours:
+            days_since_period_start = (
+                local_time.weekday() - business_period.day_of_week
+            ) % 7
+            period_date = local_time.date() - timedelta(
+                days=days_since_period_start
+            )
+            period_start = datetime.combine(
+                period_date,
+                business_period.open_time,
+                tzinfo=shop_timezone,
+            )
+            period_end_date = period_date
+            if business_period.close_time <= business_period.open_time:
+                period_end_date += timedelta(days=1)
+            period_end = datetime.combine(
+                period_end_date,
+                business_period.close_time,
+                tzinfo=shop_timezone,
+            )
+            if period_start <= local_time < period_end:
+                return True
+        return False
 
     @staticmethod
     def _validate_products(
         *,
         requested_quantities: dict[str, int],
         products_by_id: dict[str, Product],
-        shop_id: str,
     ) -> None:
         missing_food_ids = sorted(
             set(requested_quantities) - set(products_by_id)
@@ -106,10 +232,6 @@ class OrderServices:
 
         for food_id, quantity in requested_quantities.items():
             product = products_by_id[food_id]
-            if product.shop_id != shop_id:
-                raise ProductShopMismatchError(
-                    f"Product {food_id} does not belong to shop {shop_id}"
-                )
             if not product.is_listed:
                 raise ProductUnavailableError(
                     f"Product {food_id} is not listed"

@@ -1,12 +1,36 @@
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
+
+from motor.motor_asyncio import (
+    AsyncIOMotorClientSession,
+    AsyncIOMotorDatabase,
+)
+
+
+_T = TypeVar("_T")
 
 
 class OrderRepository:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.order_collection = db["orders"]
 
-    async def create_order(self, order_data: dict):
-        result = await self.order_collection.insert_one(order_data)
+    async def run_in_transaction(
+        self,
+        callback: Callable[[AsyncIOMotorClientSession], Awaitable[_T]],
+    ) -> _T:
+        client = self.order_collection.database.client
+        async with await client.start_session() as session:
+            return await session.with_transaction(callback)
+
+    async def create_order(
+        self,
+        order_data: dict,
+        session: AsyncIOMotorClientSession | None = None,
+    ):
+        result = await self.order_collection.insert_one(
+            order_data,
+            session=session,
+        )
         return result.inserted_id
    
     async def query_order_by_id(self, order_id: str,user_id:str):

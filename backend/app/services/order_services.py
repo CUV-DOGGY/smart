@@ -5,9 +5,15 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.contants.order_status import OrderStatus, can_transition
+from app.repositories.address_repository import AddressRepository
 from app.repositories.order_repository import OrderRepository
 from app.repositories.product_repository import ProductRepository
 from app.repositories.shop_repository import ShopRepository
+from app.schemas.delivery import (
+    DeliveryAddressInput,
+    OrderDeliveryAddressSnapshot,
+    ResolvedDeliveryLocation,
+)
 from app.schemas.order import (
     OrderCancelResponse,
     OrderCreate,
@@ -55,18 +61,24 @@ class InventoryReservationError(RuntimeError):
     """商品状态或库存发生并发变化，库存预占失败。"""
 
 
+class OrderAddressNotFoundError(RuntimeError):
+    """请求中的地址不存在、已删除或不属于当前用户。"""
+
+
 class OrderServices:
     def __init__(
         self,
         repository: OrderRepository,
         product_repository: ProductRepository,
         shop_repository: ShopRepository,
+        address_repository: AddressRepository,
         delivery_location_service: DeliveryLocationService,
         now_provider: Callable[[], datetime] | None = None,
     ):
         self.repository = repository
         self.product_repository = product_repository
         self.shop_repository = shop_repository
+        self.address_repository = address_repository
         self.delivery_location_service = delivery_location_service
         self.now_provider = now_provider or (
             lambda: datetime.now(timezone.utc)
@@ -84,36 +96,54 @@ class OrderServices:
         if create_time.tzinfo is None:
             raise RuntimeError("now_provider must return a timezone-aware datetime")
 
-        preliminary_shop = await self.shop_repository.find_by_shop_id(
-            order.shop_id
-        )
-        self._validate_shop(preliminary_shop, create_time)
-        self.delivery_location_service.validate_shop_configuration(
-            preliminary_shop
-        )
-        resolved_delivery_location = (
-            await self.delivery_location_service.resolve(
-                order.delivery_address
-            )
-        )
-        self.delivery_location_service.build_snapshot(
-            address=order.delivery_address,
-            resolved=resolved_delivery_location,
-            shop=preliminary_shop,
-        )
-
         async def create_in_transaction(session):
+            saved_address = await self.address_repository.find_by_id(
+                user_id=user_id,
+                address_id=order.address_id,
+                session=session,
+            )
+            if saved_address is None:
+                raise OrderAddressNotFoundError("Address not found")
+
             shop = await self.shop_repository.find_by_shop_id(
                 order.shop_id,
                 session=session,
             )
             self._validate_shop(shop, create_time)
-            delivery_snapshot = (
+            address_input = DeliveryAddressInput(
+                province=saved_address.province,
+                city=saved_address.city,
+                district=saved_address.district,
+                detail_address=saved_address.detail_address,
+                longitude=saved_address.longitude,
+                latitude=saved_address.latitude,
+            )
+            resolved_delivery_location = ResolvedDeliveryLocation(
+                longitude=saved_address.longitude,
+                latitude=saved_address.latitude,
+                formatted_address=saved_address.formatted_address,
+                province=saved_address.province,
+                city=saved_address.city,
+                district=saved_address.district,
+                adcode=saved_address.adcode,
+                location_source=saved_address.location_source,
+                verification_status=(
+                    saved_address.verification_status
+                ),
+            )
+            location_snapshot = (
                 self.delivery_location_service.build_snapshot(
-                    address=order.delivery_address,
+                    address=address_input,
                     resolved=resolved_delivery_location,
                     shop=shop,
                 )
+            )
+            delivery_snapshot = OrderDeliveryAddressSnapshot(
+                **location_snapshot.model_dump(),
+                address_id=saved_address.address_id,
+                receiver_name=saved_address.receiver_name,
+                receiver_phone=saved_address.receiver_phone,
+                address_version=saved_address.version,
             )
 
             products = (
@@ -215,12 +245,15 @@ class OrderServices:
         shop: Shop,
         current_time: datetime,
     ) -> bool:
-        try:
-            shop_timezone = ZoneInfo(shop.timezone)
-        except ZoneInfoNotFoundError as exc:
-            raise ShopUnavailableError(
-                "Shop timezone configuration is invalid"
-            ) from exc
+        if shop.timezone == "UTC":
+            shop_timezone = timezone.utc
+        else:
+            try:
+                shop_timezone = ZoneInfo(shop.timezone)
+            except ZoneInfoNotFoundError as exc:
+                raise ShopUnavailableError(
+                    "Shop timezone configuration is invalid"
+                ) from exc
 
         local_time = current_time.astimezone(shop_timezone)
         for business_period in shop.business_hours:

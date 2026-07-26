@@ -103,6 +103,15 @@ class DeliveryLocationSnapshot(ResolvedDeliveryLocation):
     delivery_radius_meters_snapshot: int = Field(gt=0)
 
 
+class OrderDeliveryAddressSnapshot(DeliveryLocationSnapshot):
+    """订单保存的用户地址及配送判断快照。"""
+
+    address_id: str = Field(min_length=1, max_length=64)
+    receiver_name: str = Field(min_length=1, max_length=50)
+    receiver_phone: str = Field(pattern=r"^1[3-9]\d{9}$")
+    address_version: int = Field(ge=1)
+
+
 class ShopLocationUpdate(BaseModel):
     """店铺地址编码服务返回、供未来店铺管理功能保存的数据。"""
 

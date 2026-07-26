@@ -1,6 +1,7 @@
 from app.core import Logger, setup_middleware, lifespan
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.dependencies.auth import get_current_user_id
+from app.routers.address_router import router as address_router
 from app.routers.auth_router import router as auth_router
 from app.routers.order_router import router as order_router
 import logging
@@ -19,6 +20,7 @@ app = FastAPI(
 
 setup_middleware(app)
 app.include_router(auth_router)
+app.include_router(address_router)
 app.include_router(order_router)
 
 

@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, time, timezone
 
-from app.schemas.delivery import GeocodingResult
+from app.schemas.address import UserAddress
 from app.schemas.order import OrderCreate
 from app.schemas.product import Product
 from app.schemas.shop import Shop
@@ -10,6 +10,7 @@ from app.services.order_services import (
     InsufficientStockError,
     InventoryReservationError,
     MinimumOrderAmountError,
+    OrderAddressNotFoundError,
     OrderServices,
     ProductNotFoundError,
     ProductUnavailableError,
@@ -20,30 +21,6 @@ from app.services.order_services import (
 
 
 TEST_NOW = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
-
-
-class FakeAmapService:
-    async def geocode(self, address):
-        return GeocodingResult(
-            longitude=116.001,
-            latitude=39.0,
-            formatted_address=address.full_address(),
-            province=address.province,
-            city=address.city,
-            district=address.district,
-            adcode="110105",
-        )
-
-    async def reverse_geocode(self, *, longitude: float, latitude: float):
-        return GeocodingResult(
-            longitude=longitude,
-            latitude=latitude,
-            formatted_address="Test formatted address",
-            province="北京市",
-            city="北京市",
-            district="朝阳区",
-            adcode="110105",
-        )
 
 
 class FakeOrderRepository:
@@ -111,6 +88,29 @@ class FakeShopRepository:
         return self.shop
 
 
+class FakeAddressRepository:
+    def __init__(self, address: UserAddress | None):
+        self.address = address
+        self.query: tuple[str, str] | None = None
+
+    async def find_by_id(
+        self,
+        *,
+        user_id: str,
+        address_id: str,
+        session=None,
+    ) -> UserAddress | None:
+        self.query = (user_id, address_id)
+        if (
+            self.address is None
+            or self.address.user_id != user_id
+            or self.address.address_id != address_id
+            or self.address.is_deleted
+        ):
+            return None
+        return self.address
+
+
 def make_product(**overrides) -> Product:
     product_data = {
         "food_id": "food-001",
@@ -149,16 +149,37 @@ def make_shop(**overrides) -> Shop:
     return Shop(**shop_data)
 
 
+def make_address(**overrides) -> UserAddress:
+    address_data = {
+        "address_id": "address-001",
+        "user_id": "user-001",
+        "receiver_name": "Test User",
+        "receiver_phone": "13800138000",
+        "province": "北京市",
+        "city": "北京市",
+        "district": "朝阳区",
+        "detail_address": "Test address",
+        "longitude": 116.001,
+        "latitude": 39.0,
+        "formatted_address": "Test formatted address",
+        "adcode": "110105",
+        "location_source": "geocoded",
+        "verification_status": "verified",
+        "is_default": True,
+        "version": 2,
+        "is_deleted": False,
+        "create_time": TEST_NOW,
+        "update_time": TEST_NOW,
+    }
+    address_data.update(overrides)
+    return UserAddress(**address_data)
+
+
 def make_order(items: list[dict] | None = None) -> OrderCreate:
     return OrderCreate(
         shop_id="shop-001",
+        address_id="address-001",
         items=items or [{"food_id": "food-001", "quantity": 2}],
-        delivery_address={
-            "province": "北京市",
-            "city": "北京市",
-            "district": "朝阳区",
-            "detail_address": "Test address",
-        },
     )
 
 
@@ -168,6 +189,8 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         products: list[Product],
         *,
         shop: Shop | None = None,
+        address: UserAddress | None = None,
+        no_address: bool = False,
         failed_reservations: set[str] | None = None,
     ):
         order_repository = FakeOrderRepository()
@@ -178,11 +201,17 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         shop_repository = FakeShopRepository(
             make_shop() if shop is None else shop
         )
+        address_repository = FakeAddressRepository(
+            None
+            if no_address
+            else (make_address() if address is None else address)
+        )
         service = OrderServices(
             order_repository,
             product_repository,
             shop_repository,
-            DeliveryLocationService(FakeAmapService()),
+            address_repository,
+            DeliveryLocationService(),
             now_provider=lambda: TEST_NOW,
         )
         return (
@@ -243,6 +272,35 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
             ],
             "geocoded",
         )
+        self.assertEqual(
+            order_repository.created_order["delivery_address"][
+                "address_id"
+            ],
+            "address-001",
+        )
+        self.assertEqual(
+            order_repository.created_order["delivery_address"][
+                "address_version"
+            ],
+            2,
+        )
+        self.assertEqual(
+            order_repository.created_order["delivery_address"][
+                "receiver_phone"
+            ],
+            "13800138000",
+        )
+
+    async def test_rejects_missing_or_unowned_address(self):
+        service, order_repository, _, _ = self.make_service(
+            [make_product()],
+            no_address=True,
+        )
+
+        with self.assertRaises(OrderAddressNotFoundError):
+            await service.create_order(make_order(), "user-001")
+
+        self.assertIsNone(order_repository.created_order)
 
     async def test_rejects_missing_shop(self):
         service, order_repository, _, _ = self.make_service(

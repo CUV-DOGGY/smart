@@ -5,23 +5,15 @@ from pydantic import ValidationError
 from app.schemas.order import OrderCreate
 
 
-DELIVERY_ADDRESS = {
-    "province": "北京市",
-    "city": "北京市",
-    "district": "朝阳区",
-    "detail_address": "测试路1号",
-}
-
-
 class OrderCreateSchemaTests(unittest.TestCase):
     def test_accepts_single_shop_items_without_client_prices(self):
         order = OrderCreate(
             shop_id="shop-001",
+            address_id="address-001",
             items=[
                 {"food_id": "food-001", "quantity": 2},
                 {"food_id": "food-002", "quantity": 1},
             ],
-            delivery_address=DELIVERY_ADDRESS,
         )
 
         self.assertEqual(order.shop_id, "shop-001")
@@ -31,6 +23,7 @@ class OrderCreateSchemaTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             OrderCreate(
                 shop_id="shop-001",
+                address_id="address-001",
                 items=[
                     {
                         "food_id": "food-001",
@@ -39,25 +32,38 @@ class OrderCreateSchemaTests(unittest.TestCase):
                         "price": 0,
                     }
                 ],
-                delivery_address=DELIVERY_ADDRESS,
             )
 
     def test_rejects_empty_items(self):
         with self.assertRaises(ValidationError):
             OrderCreate(
                 shop_id="shop-001",
+                address_id="address-001",
                 items=[],
-                delivery_address=DELIVERY_ADDRESS,
             )
 
     def test_quantity_has_no_fixed_upper_limit(self):
         order = OrderCreate(
             shop_id="shop-001",
+            address_id="address-001",
             items=[{"food_id": "food-001", "quantity": 1000}],
-            delivery_address=DELIVERY_ADDRESS,
         )
 
         self.assertEqual(order.items[0].quantity, 1000)
+
+    def test_rejects_raw_delivery_address(self):
+        with self.assertRaises(ValidationError):
+            OrderCreate(
+                shop_id="shop-001",
+                address_id="address-001",
+                items=[{"food_id": "food-001", "quantity": 1}],
+                delivery_address={
+                    "province": "北京市",
+                    "city": "北京市",
+                    "district": "朝阳区",
+                    "detail_address": "测试路1号",
+                },
+            )
 
 
 if __name__ == "__main__":

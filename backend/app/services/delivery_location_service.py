@@ -40,13 +40,20 @@ class OutsideDeliveryAreaError(RuntimeError):
 
 
 class DeliveryLocationService:
-    def __init__(self, amap_service: AmapGeocodingService):
+    def __init__(
+        self,
+        amap_service: AmapGeocodingService | None = None,
+    ):
         self.amap_service = amap_service
 
     async def resolve(
         self,
         address: DeliveryAddressInput,
     ) -> ResolvedDeliveryLocation:
+        if self.amap_service is None:
+            raise RuntimeError(
+                "AMap service is required to resolve an address"
+            )
         if address.longitude is not None and address.latitude is not None:
             longitude = round(address.longitude, 6)
             latitude = round(address.latitude, 6)

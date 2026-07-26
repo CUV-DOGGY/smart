@@ -22,6 +22,7 @@ class Settings(BaseSettings):
 
     # 高德 Web 服务
     AMAP_WEB_SERVICE_KEY: SecretStr
+    AMAP_BASE_URL: str = "https://restapi.amap.com"
     AMAP_CONNECT_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0, le=30)
     AMAP_READ_TIMEOUT_SECONDS: float = Field(default=3.0, gt=0, le=30)
     AMAP_MAX_RETRIES: int = Field(default=1, ge=0, le=3)

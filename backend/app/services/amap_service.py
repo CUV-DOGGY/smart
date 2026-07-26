@@ -8,8 +8,11 @@ from redis.exceptions import RedisError
 from app.schemas.delivery import GeocodingResult, StructuredAddress
 
 
-AMAP_GEOCODE_URL = "https://restapi.amap.com/v3/geocode/geo"
-AMAP_REVERSE_GEOCODE_URL = "https://restapi.amap.com/v3/geocode/regeo"
+DEFAULT_AMAP_BASE_URL = "https://restapi.amap.com"
+AMAP_GEOCODE_URL = f"{DEFAULT_AMAP_BASE_URL}/v3/geocode/geo"
+AMAP_REVERSE_GEOCODE_URL = (
+    f"{DEFAULT_AMAP_BASE_URL}/v3/geocode/regeo"
+)
 COARSE_GEOCODING_LEVELS = {
     "省",
     "市",
@@ -45,6 +48,7 @@ class AmapGeocodingService:
         self,
         *,
         key: str,
+        base_url: str = DEFAULT_AMAP_BASE_URL,
         connect_timeout_seconds: float,
         read_timeout_seconds: float,
         max_retries: int,
@@ -56,6 +60,11 @@ class AmapGeocodingService:
         if not key:
             raise ValueError("AMap Web service key is required")
         self.key = key
+        normalized_base_url = base_url.rstrip("/")
+        self.geocode_url = f"{normalized_base_url}/v3/geocode/geo"
+        self.reverse_geocode_url = (
+            f"{normalized_base_url}/v3/geocode/regeo"
+        )
         self.timeout = httpx.Timeout(
             connect=connect_timeout_seconds,
             read=read_timeout_seconds,
@@ -79,7 +88,7 @@ class AmapGeocodingService:
             return cached
 
         payload = await self._request_json(
-            AMAP_GEOCODE_URL,
+            self.geocode_url,
             {
                 "address": normalized_address,
                 "city": address.city,
@@ -137,7 +146,7 @@ class AmapGeocodingService:
             return cached
 
         payload = await self._request_json(
-            AMAP_REVERSE_GEOCODE_URL,
+            self.reverse_geocode_url,
             {
                 "location": normalized_location,
                 "extensions": "base",

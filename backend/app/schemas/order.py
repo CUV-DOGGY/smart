@@ -3,8 +3,8 @@ from typing import List
 from datetime import datetime
 from app.contants.order_status import OrderStatus
 from app.schemas.delivery import (
-    DeliveryAddressInput,
     DeliveryLocationSnapshot,
+    OrderDeliveryAddressSnapshot,
 )
 
 
@@ -41,8 +41,8 @@ class OrderCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     shop_id: str = Field(min_length=1, max_length=64)
+    address_id: str = Field(min_length=1, max_length=64)
     items: List[OrderCreateItem] = Field(min_length=1, max_length=50)
-    delivery_address: DeliveryAddressInput
 
 
 class OrderQueryByIdData(BaseModel):
@@ -52,7 +52,11 @@ class OrderQueryByIdData(BaseModel):
     shop_id: str = Field(min_length=1)
     items: List[OrderItem]
     order_status: OrderStatus
-    delivery_address: DeliveryLocationSnapshot | str
+    delivery_address: (
+        OrderDeliveryAddressSnapshot
+        | DeliveryLocationSnapshot
+        | str
+    )
     create_time: datetime 
     finish_time: datetime | None = None
     cancel_time: datetime | None = None

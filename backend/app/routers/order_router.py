@@ -14,7 +14,9 @@ from app.services.order_services import (
     InventoryReservationError,
     MinimumOrderAmountError,
     OrderAddressNotFoundError,
+    OrderNotFoundError,
     OrderServices,
+    OrderStateConflictError,
     ProductNotFoundError,
     ProductUnavailableError,
     ShopClosedError,
@@ -169,4 +171,26 @@ async def cancel_order(
     user_id: Annotated[str, Depends(get_current_user_id)],
     service: OrderServices = Depends(get_order_service),
 ):
-    return await service.cancel_order(request.order_id, user_id)
+    try:
+        return await service.cancel_order(request.order_id, user_id)
+    except OrderNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "ORDER_NOT_FOUND",
+                "message": str(exc),
+            },
+        ) from exc
+    except OrderStateConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "ORDER_STATE_CONFLICT",
+                "message": str(exc),
+                "order_status": (
+                    exc.current_status.value
+                    if exc.current_status is not None
+                    else None
+                ),
+            },
+        ) from exc

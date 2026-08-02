@@ -74,6 +74,23 @@ class IdempotencyKeyConflictError(RuntimeError):
     """同一个幂等键被用于不同的创建订单请求。"""
 
 
+class OrderNotFoundError(RuntimeError):
+    """The order does not exist or is not accessible to the user."""
+
+
+class OrderStateConflictError(RuntimeError):
+    """The order exists, but its current state rejects the operation."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        current_status: OrderStatus | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.current_status = current_status
+
+
 class OrderServices:
     def __init__(
         self,
@@ -425,18 +442,21 @@ class OrderServices:
             orders=[OrderHistoryItem(**order) for order in result],
         )
 
-    async def cancel_order(self, order_id: str, user_id: str):
+    async def cancel_order(
+        self,
+        order_id: str,
+        user_id: str,
+    ) -> OrderCancelResponse:
         result = await self.repository.query_order_status(order_id, user_id)
         if result is None:
-            return OrderCancelResponse(
-                status="error", message="Order not found", order_status=None
+            raise OrderNotFoundError(
+                "Order not found or not accessible"
             )
         current_status = OrderStatus(result["order_status"])
         if not can_transition(current_status, OrderStatus.CANCELING):
-            return OrderCancelResponse(
-                status="error",
-                message="Current order status cannot be canceled",
-                order_status=current_status,
+            raise OrderStateConflictError(
+                "Current order status cannot be canceled",
+                current_status=current_status,
             )
         success = await self.repository.cancel_order(
             order_id,
@@ -445,11 +465,21 @@ class OrderServices:
             target_status=OrderStatus.CANCELING.value,
         )
         if not success:
-            laest_status = await self.repository.query_order_status(order_id, user_id)
-            return OrderCancelResponse(
-                status="error",
-                message="Failed to cancel order",
-                order_status=OrderStatus(laest_status["order_status"]),
+            latest_document = await self.repository.query_order_status(
+                order_id,
+                user_id,
+            )
+            if latest_document is None:
+                raise OrderNotFoundError(
+                    "Order no longer exists or is not accessible"
+                )
+
+            latest_status = OrderStatus(
+                latest_document["order_status"]
+            )
+            raise OrderStateConflictError(
+                "Order status changed; cancellation was rejected",
+                current_status=latest_status,
             )
         return OrderCancelResponse(
             status="success",

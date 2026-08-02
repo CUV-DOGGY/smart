@@ -13,6 +13,8 @@ from app.services.order_services import (
     InventoryReservationError,
     MinimumOrderAmountError,
     OrderAddressNotFoundError,
+    OrderNotFoundError,
+    OrderStateConflictError,
     OrderServices,
     ProductNotFoundError,
     ProductUnavailableError,
@@ -611,16 +613,20 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = ConcurrentCancelRepository()
         service.repository = repository
 
-        response = await service.cancel_order(
-            "order-001",
-            "user-001",
-        )
+        with self.assertRaises(OrderStateConflictError) as raised:
+            await service.cancel_order(
+                "order-001",
+                "user-001",
+            )
 
         self.assertEqual(
             repository.order_status,
             OrderStatus.DELIVERING.value,
         )
-        self.assertEqual(response.status, "error")
+        self.assertEqual(
+            raised.exception.current_status,
+            OrderStatus.DELIVERING,
+        )
 
     async def test_cancel_failed_returns_latest_delivering_status(self):
         class MockOrderRepository:
@@ -660,19 +666,22 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         repository = MockOrderRepository()
         service.repository = repository
 
-        response = await service.cancel_order(
-            "order-001",
-            "user-001",
-        )
+        with self.assertRaises(OrderStateConflictError) as raised:
+            await service.cancel_order(
+                "order-001",
+                "user-001",
+            )
 
         self.assertEqual(
             repository.mock_db["order-001"]["order_status"],
             OrderStatus.DELIVERING.value,
         )
-        self.assertEqual(response.status, "error")
-        self.assertEqual(response.message, "Failed to cancel order")
         self.assertEqual(
-            response.order_status,
+            str(raised.exception),
+            "Order status changed; cancellation was rejected",
+        )
+        self.assertEqual(
+            raised.exception.current_status,
             OrderStatus.DELIVERING,
         )
 
@@ -718,6 +727,69 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             response.order_status,
             OrderStatus.CANCELING,
+        )
+
+    async def test_cancel_raises_not_found_when_order_disappears_after_conflict(
+        self,
+    ):
+        class DisappearingOrderRepository:
+            def __init__(self):
+                self.query_count = 0
+                self.cancel_count = 0
+                self.cancel_arguments = None
+
+            async def query_order_status(
+                self,
+                order_id: str,
+                user_id: str,
+            ):
+                self.query_count += 1
+
+                if self.query_count == 1:
+                    return {"order_status": OrderStatus.PREPARING.value}
+
+                return None
+
+            async def cancel_order(
+                self,
+                order_id: str,
+                user_id: str,
+                expected_status: str,
+                target_status: str,
+            ):
+                self.cancel_count += 1
+                self.cancel_arguments = (
+                    order_id,
+                    user_id,
+                    expected_status,
+                    target_status,
+                )
+                return False
+
+        service, _, _, _ = self.make_service([make_product()])
+        repository = DisappearingOrderRepository()
+        service.repository = repository
+
+        with self.assertRaises(OrderNotFoundError) as raised:
+            await service.cancel_order(
+                "order-001",
+                "user-001",
+            )
+
+        self.assertEqual(repository.query_count, 2)
+        self.assertEqual(repository.cancel_count, 1)
+        self.assertEqual(
+            repository.cancel_arguments,
+            (
+                "order-001",
+                "user-001",
+                OrderStatus.PREPARING.value,
+                OrderStatus.CANCELING.value,
+            ),
+        )
+        self.assertEqual(
+            str(raised.exception),
+            "Order no longer exists or is not accessible",
         )
 
 

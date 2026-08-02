@@ -96,9 +96,18 @@ class OrderRepository:
         return result
     
     async def query_order_status(self, order_id: str, user_id: str):
-        result = await self.order_collection.find_one({"order_id": order_id,
-        "user_id": user_id}, {"_id": 0, "order_status": 1})
-        return result
+        try:
+            return await self.order_collection.find_one(
+                {
+                    "order_id": order_id,
+                    "user_id": user_id,
+                },
+                {"_id": 0, "order_status": 1},
+            )
+        except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
+            raise DatabaseUnavailableError(
+                "MongoDB order status lookup is temporarily unavailable"
+            ) from exc
         
     async def query_order_history(self, user_id: str):
         result = await self.order_collection.find(
@@ -108,14 +117,24 @@ class OrderRepository:
         return result
 
 
-    async def cancel_order(self,order_id: str,
-                           user_id: str, 
-                           expected_status:str,
-                           target_status:str 
-        ):
-        result = await self.order_collection.update_one(
-            {"order_id": order_id, "user_id": user_id, 
-            "order_status": expected_status,},
-            {"$set": {"order_status": target_status}}
-        )
+    async def cancel_order(
+        self,
+        order_id: str,
+        user_id: str,
+        expected_status: str,
+        target_status: str,
+    ) -> bool:
+        try:
+            result = await self.order_collection.update_one(
+                {
+                    "order_id": order_id,
+                    "user_id": user_id,
+                    "order_status": expected_status,
+                },
+                {"$set": {"order_status": target_status}},
+            )
+        except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
+            raise DatabaseUnavailableError(
+                "MongoDB order cancellation is temporarily unavailable"
+            ) from exc
         return result.modified_count == 1

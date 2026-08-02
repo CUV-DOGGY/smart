@@ -71,12 +71,14 @@ async def lifespan(app: FastAPI):
         app.state.db = db
         logger.info("MongoDB 连接成功")
 
-        # 最终由数据库唯一索引保证用户名和用户 ID 不重复。
+        # 最终由数据库唯一索引保证用户身份与订单幂等约束。
         from app.repositories.address_repository import AddressRepository
         from app.repositories.auth_repository import AuthRepository
+        from app.repositories.order_repository import OrderRepository
         await AuthRepository(db).ensure_indexes()
         await AddressRepository(db).ensure_indexes()
-        logger.info("用户索引初始化成功")
+        await OrderRepository(db).ensure_indexes()
+        logger.info("数据库索引初始化成功")
 
         # 2. 连接 Redis。限流依赖 Redis，连接失败时拒绝启动。
         logger.info("连接 Redis...")

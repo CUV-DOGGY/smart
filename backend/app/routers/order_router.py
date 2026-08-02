@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from app.dependencies.auth import get_current_user_id
 from app.schemas.order import (
@@ -10,6 +10,7 @@ from app.schemas.order import (
 )
 from app.services.order_services import (
     InsufficientStockError,
+    IdempotencyKeyConflictError,
     InventoryReservationError,
     MinimumOrderAmountError,
     OrderAddressNotFoundError,
@@ -71,10 +72,24 @@ def get_order_service(
 async def create_order(
     order: OrderCreate,
     user_id: Annotated[str, Depends(get_current_user_id)],
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=8,
+            max_length=128,
+            pattern=r"^[A-Za-z0-9._:-]+$",
+            description="一次下单意图的唯一幂等键",
+        ),
+    ],
     service: OrderServices = Depends(get_order_service),
 ):
     try:
-        return await service.create_order(order, user_id)
+        return await service.create_order(
+            order,
+            user_id,
+            idempotency_key=idempotency_key,
+        )
     except OrderAddressNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -109,6 +124,7 @@ async def create_order(
             },
         ) from exc
     except (
+        IdempotencyKeyConflictError,
         ShopUnavailableError,
         ShopClosedError,
         ProductUnavailableError,

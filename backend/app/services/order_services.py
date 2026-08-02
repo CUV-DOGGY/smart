@@ -1,3 +1,5 @@
+import hashlib
+import json
 import math
 import uuid
 from collections.abc import Callable
@@ -6,7 +8,10 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.contants.order_status import OrderStatus, can_transition
 from app.repositories.address_repository import AddressRepository
-from app.repositories.order_repository import OrderRepository
+from app.repositories.order_repository import (
+    OrderRepository,
+    OrderUniquenessConflictError,
+)
 from app.repositories.product_repository import ProductRepository
 from app.repositories.shop_repository import ShopRepository
 from app.schemas.delivery import (
@@ -65,6 +70,10 @@ class OrderAddressNotFoundError(RuntimeError):
     """请求中的地址不存在、已删除或不属于当前用户。"""
 
 
+class IdempotencyKeyConflictError(RuntimeError):
+    """同一个幂等键被用于不同的创建订单请求。"""
+
+
 class OrderServices:
     def __init__(
         self,
@@ -80,15 +89,33 @@ class OrderServices:
         self.shop_repository = shop_repository
         self.address_repository = address_repository
         self.delivery_location_service = delivery_location_service
-        self.now_provider = now_provider or (
-            lambda: datetime.now(timezone.utc)
-        )
+        self.now_provider = now_provider or (lambda: datetime.now(timezone.utc))
 
-    async def create_order(self, order: OrderCreate, user_id: str):
+    async def create_order(
+        self,
+        order: OrderCreate,
+        user_id: str,
+        *,
+        idempotency_key: str,
+    ):
         requested_quantities: dict[str, int] = {}
         for item in order.items:
             requested_quantities[item.food_id] = (
                 requested_quantities.get(item.food_id, 0) + item.quantity
+            )
+
+        request_hash = self._build_idempotency_request_hash(
+            order=order,
+            requested_quantities=requested_quantities,
+        )
+        existing_order = await self.repository.find_by_idempotency_key(
+            user_id=user_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing_order is not None:
+            return self._response_from_idempotent_order(
+                existing_order,
+                request_hash=request_hash,
             )
 
         order_id = str(uuid.uuid4())
@@ -127,16 +154,12 @@ class OrderServices:
                 district=saved_address.district,
                 adcode=saved_address.adcode,
                 location_source=saved_address.location_source,
-                verification_status=(
-                    saved_address.verification_status
-                ),
+                verification_status=(saved_address.verification_status),
             )
-            location_snapshot = (
-                self.delivery_location_service.build_snapshot(
-                    address=address_input,
-                    resolved=resolved_delivery_location,
-                    shop=shop,
-                )
+            location_snapshot = self.delivery_location_service.build_snapshot(
+                address=address_input,
+                resolved=resolved_delivery_location,
+                shop=shop,
             )
             delivery_snapshot = OrderDeliveryAddressSnapshot(
                 **location_snapshot.model_dump(),
@@ -146,16 +169,12 @@ class OrderServices:
                 address_version=saved_address.version,
             )
 
-            products = (
-                await self.product_repository.find_by_shop_and_food_ids(
-                    order.shop_id,
-                    list(requested_quantities),
-                    session=session,
-                )
+            products = await self.product_repository.find_by_shop_and_food_ids(
+                order.shop_id,
+                list(requested_quantities),
+                session=session,
             )
-            products_by_id = {
-                product.food_id: product for product in products
-            }
+            products_by_id = {product.food_id: product for product in products}
             self._validate_products(
                 requested_quantities=requested_quantities,
                 products_by_id=products_by_id,
@@ -164,12 +183,14 @@ class OrderServices:
             order_items = []
             for food_id, quantity in requested_quantities.items():
                 product = products_by_id[food_id]
-                order_items.append({
-                    "food_id": product.food_id,
-                    "food_name": product.food_name,
-                    "quantity": quantity,
-                    "price": product.price,
-                })
+                order_items.append(
+                    {
+                        "food_id": product.food_id,
+                        "food_name": product.food_name,
+                        "quantity": quantity,
+                        "price": product.price,
+                    }
+                )
 
             goods_amount = math.fsum(
                 item["price"] * item["quantity"] for item in order_items
@@ -205,6 +226,8 @@ class OrderServices:
                 "goods_amount": goods_amount,
                 "delivery_fee": delivery_fee,
                 "total_price": total_price,
+                "idempotency_key": idempotency_key,
+                "idempotency_request_hash": request_hash,
             }
             await self.repository.create_order(
                 order_data,
@@ -218,13 +241,78 @@ class OrderServices:
                 goods_amount=goods_amount,
                 delivery_fee=delivery_fee,
                 total_price=total_price,
-                delivery_distance_meters=(
-                    delivery_snapshot.distance_meters
-                ),
+                delivery_distance_meters=(delivery_snapshot.distance_meters),
             )
 
-        return await self.repository.run_in_transaction(
-            create_in_transaction
+        try:
+            return await self.repository.run_in_transaction(create_in_transaction)
+        except OrderUniquenessConflictError as exc:
+            # 两个相同幂等键可能同时通过事务外的快速查询。数据库唯一
+            # 索引决定唯一赢家；失败方读取赢家已经提交的订单并复用结果。
+            existing_order = await self.repository.find_by_idempotency_key(
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+            )
+            if existing_order is None:
+                raise RuntimeError(
+                    "Order uniqueness conflict could not be resolved"
+                ) from exc
+            return self._response_from_idempotent_order(
+                existing_order,
+                request_hash=request_hash,
+            )
+
+    @staticmethod
+    def _build_idempotency_request_hash(
+        *,
+        order: OrderCreate,
+        requested_quantities: dict[str, int],
+    ) -> str:
+        canonical_request = {
+            "shop_id": order.shop_id,
+            "address_id": order.address_id,
+            "items": [
+                {
+                    "food_id": food_id,
+                    "quantity": quantity,
+                }
+                for food_id, quantity in sorted(requested_quantities.items())
+            ],
+        }
+        serialized = json.dumps(
+            canonical_request,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _response_from_idempotent_order(
+        order_document: dict,
+        *,
+        request_hash: str,
+    ) -> OrderCreateResponse:
+        if order_document.get("idempotency_request_hash") != request_hash:
+            raise IdempotencyKeyConflictError(
+                "Idempotency key was already used for another order request"
+            )
+
+        delivery_address = order_document.get("delivery_address")
+        if not isinstance(delivery_address, dict):
+            raise RuntimeError(
+                "Idempotent order is missing its delivery address snapshot"
+            )
+
+        return OrderCreateResponse(
+            status="success",
+            message="Order created successfully",
+            order_id=order_document["order_id"],
+            order_status=OrderStatus(order_document["order_status"]),
+            goods_amount=order_document["goods_amount"],
+            delivery_fee=order_document["delivery_fee"],
+            total_price=order_document["total_price"],
+            delivery_distance_meters=delivery_address["distance_meters"],
         )
 
     @classmethod
@@ -260,9 +348,7 @@ class OrderServices:
             days_since_period_start = (
                 local_time.weekday() - business_period.day_of_week
             ) % 7
-            period_date = local_time.date() - timedelta(
-                days=days_since_period_start
-            )
+            period_date = local_time.date() - timedelta(days=days_since_period_start)
             period_start = datetime.combine(
                 period_date,
                 business_period.open_time,
@@ -286,9 +372,7 @@ class OrderServices:
         requested_quantities: dict[str, int],
         products_by_id: dict[str, Product],
     ) -> None:
-        missing_food_ids = sorted(
-            set(requested_quantities) - set(products_by_id)
-        )
+        missing_food_ids = sorted(set(requested_quantities) - set(products_by_id))
         if missing_food_ids:
             raise ProductNotFoundError(
                 f"Products not found: {', '.join(missing_food_ids)}"
@@ -297,13 +381,9 @@ class OrderServices:
         for food_id, quantity in requested_quantities.items():
             product = products_by_id[food_id]
             if not product.is_listed:
-                raise ProductUnavailableError(
-                    f"Product {food_id} is not listed"
-                )
+                raise ProductUnavailableError(f"Product {food_id} is not listed")
             if not product.is_available:
-                raise ProductUnavailableError(
-                    f"Product {food_id} is not available"
-                )
+                raise ProductUnavailableError(f"Product {food_id} is not available")
             if quantity > product.stock:
                 raise InsufficientStockError(
                     f"Insufficient stock for product {food_id}"
@@ -320,7 +400,7 @@ class OrderServices:
         return OrderQueryByIdResponse(
             status="success",
             message="Order queried successfully",
-            order=OrderQueryByIdData(**result)
+            order=OrderQueryByIdData(**result),
         )
 
     async def query_order_status(self, order_id: str, user_id: str):
@@ -349,23 +429,27 @@ class OrderServices:
         result = await self.repository.query_order_status(order_id, user_id)
         if result is None:
             return OrderCancelResponse(
-                status="error",
-                message="Order not found",
-                order_status=None
+                status="error", message="Order not found", order_status=None
             )
         current_status = OrderStatus(result["order_status"])
         if not can_transition(current_status, OrderStatus.CANCELING):
             return OrderCancelResponse(
                 status="error",
                 message="Current order status cannot be canceled",
-                order_status=current_status
+                order_status=current_status,
             )
-        success = await self.repository.cancel_order(order_id, user_id, OrderStatus.CANCELING.value)
+        success = await self.repository.cancel_order(
+            order_id,
+            user_id,
+            expected_status=current_status.value,
+            target_status=OrderStatus.CANCELING.value,
+        )
         if not success:
+            laest_status = await self.repository.query_order_status(order_id, user_id)
             return OrderCancelResponse(
                 status="error",
                 message="Failed to cancel order",
-                order_status=current_status
+                order_status=OrderStatus(laest_status["order_status"]),
             )
         return OrderCancelResponse(
             status="success",

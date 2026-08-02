@@ -5,8 +5,10 @@ from app.schemas.address import UserAddress
 from app.schemas.order import OrderCreate
 from app.schemas.product import Product
 from app.schemas.shop import Shop
+from app.repositories.order_repository import OrderUniquenessConflictError
 from app.services.delivery_location_service import DeliveryLocationService
 from app.services.order_services import (
+    IdempotencyKeyConflictError,
     InsufficientStockError,
     InventoryReservationError,
     MinimumOrderAmountError,
@@ -18,23 +20,47 @@ from app.services.order_services import (
     ShopNotFoundError,
     ShopUnavailableError,
 )
-
+from app.contants.order_status import OrderStatus
 
 TEST_NOW = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
+TEST_IDEMPOTENCY_KEY = "checkout-test-001"
 
 
 class FakeOrderRepository:
     def __init__(self):
         self.created_order: dict | None = None
         self.transaction_count = 0
+        self.hide_existing_once = False
+        self.raise_uniqueness_conflict = False
 
     async def run_in_transaction(self, callback):
         self.transaction_count += 1
         return await callback(object())
 
     async def create_order(self, order_data: dict, session=None):
+        if self.raise_uniqueness_conflict:
+            raise OrderUniquenessConflictError(
+                "simulated concurrent idempotency conflict"
+            )
         self.created_order = order_data
         return "mongo-id"
+
+    async def find_by_idempotency_key(
+        self,
+        *,
+        user_id: str,
+        idempotency_key: str,
+    ) -> dict | None:
+        if self.hide_existing_once:
+            self.hide_existing_once = False
+            return None
+        if (
+            self.created_order is None
+            or self.created_order["user_id"] != user_id
+            or self.created_order["idempotency_key"] != idempotency_key
+        ):
+            return None
+        return self.created_order
 
 
 class FakeProductRepository:
@@ -59,8 +85,7 @@ class FakeProductRepository:
         return [
             product
             for product in self.products
-            if product.shop_id == shop_id
-            and product.food_id in requested
+            if product.shop_id == shop_id and product.food_id in requested
         ]
 
     async def reserve_stock(
@@ -198,13 +223,9 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
             products,
             failed_reservations,
         )
-        shop_repository = FakeShopRepository(
-            make_shop() if shop is None else shop
-        )
+        shop_repository = FakeShopRepository(make_shop() if shop is None else shop)
         address_repository = FakeAddressRepository(
-            None
-            if no_address
-            else (make_address() if address is None else address)
+            None if no_address else (make_address() if address is None else address)
         )
         service = OrderServices(
             order_repository,
@@ -226,7 +247,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
             self.make_service([make_product()])
         )
 
-        response = await service.create_order(make_order(), "user-001")
+        response = await service.create_order(
+            make_order(),
+            "user-001",
+            idempotency_key=TEST_IDEMPOTENCY_KEY,
+        )
 
         self.assertEqual(response.status, "success")
         self.assertEqual(response.goods_amount, 25.0)
@@ -267,29 +292,94 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
             30.0,
         )
         self.assertEqual(
-            order_repository.created_order["delivery_address"][
-                "location_source"
-            ],
+            order_repository.created_order["delivery_address"]["location_source"],
             "geocoded",
         )
         self.assertEqual(
-            order_repository.created_order["delivery_address"][
-                "address_id"
-            ],
+            order_repository.created_order["delivery_address"]["address_id"],
             "address-001",
         )
         self.assertEqual(
-            order_repository.created_order["delivery_address"][
-                "address_version"
-            ],
+            order_repository.created_order["delivery_address"]["address_version"],
             2,
         )
         self.assertEqual(
-            order_repository.created_order["delivery_address"][
-                "receiver_phone"
-            ],
+            order_repository.created_order["delivery_address"]["receiver_phone"],
             "13800138000",
         )
+        self.assertEqual(
+            order_repository.created_order["idempotency_key"],
+            TEST_IDEMPOTENCY_KEY,
+        )
+        self.assertEqual(
+            len(order_repository.created_order["idempotency_request_hash"]),
+            64,
+        )
+
+    async def test_same_idempotency_key_returns_existing_order(self):
+        service, order_repository, product_repository, _ = self.make_service(
+            [make_product()]
+        )
+
+        first_response = await service.create_order(
+            make_order(),
+            "user-001",
+            idempotency_key=TEST_IDEMPOTENCY_KEY,
+        )
+        second_response = await service.create_order(
+            make_order(),
+            "user-001",
+            idempotency_key=TEST_IDEMPOTENCY_KEY,
+        )
+
+        self.assertEqual(second_response, first_response)
+        self.assertEqual(order_repository.transaction_count, 1)
+        self.assertEqual(
+            product_repository.reservations,
+            [("food-001", 2)],
+        )
+
+    async def test_same_key_rejects_a_different_order_request(self):
+        service, order_repository, product_repository, _ = self.make_service(
+            [make_product()]
+        )
+        await service.create_order(
+            make_order(),
+            "user-001",
+            idempotency_key=TEST_IDEMPOTENCY_KEY,
+        )
+
+        with self.assertRaises(IdempotencyKeyConflictError):
+            await service.create_order(
+                make_order([{"food_id": "food-001", "quantity": 3}]),
+                "user-001",
+                idempotency_key=TEST_IDEMPOTENCY_KEY,
+            )
+
+        self.assertEqual(order_repository.transaction_count, 1)
+        self.assertEqual(
+            product_repository.reservations,
+            [("food-001", 2)],
+        )
+
+    async def test_concurrent_key_conflict_returns_the_winning_order(self):
+        service, order_repository, _, _ = self.make_service([make_product()])
+        first_response = await service.create_order(
+            make_order(),
+            "user-001",
+            idempotency_key=TEST_IDEMPOTENCY_KEY,
+        )
+
+        order_repository.hide_existing_once = True
+        order_repository.raise_uniqueness_conflict = True
+        second_response = await service.create_order(
+            make_order(),
+            "user-001",
+            idempotency_key=TEST_IDEMPOTENCY_KEY,
+        )
+
+        self.assertEqual(second_response, first_response)
+        self.assertEqual(order_repository.transaction_count, 2)
 
     async def test_rejects_missing_or_unowned_address(self):
         service, order_repository, _, _ = self.make_service(
@@ -298,7 +388,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(OrderAddressNotFoundError):
-            await service.create_order(make_order(), "user-001")
+            await service.create_order(
+                make_order(),
+                "user-001",
+                idempotency_key=TEST_IDEMPOTENCY_KEY,
+            )
 
         self.assertIsNone(order_repository.created_order)
 
@@ -309,7 +403,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(ShopNotFoundError):
-            await service.create_order(make_order(), "user-001")
+            await service.create_order(
+                make_order(),
+                "user-001",
+                idempotency_key=TEST_IDEMPOTENCY_KEY,
+            )
 
         self.assertIsNone(order_repository.created_order)
 
@@ -320,7 +418,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(ShopUnavailableError):
-            await service.create_order(make_order(), "user-001")
+            await service.create_order(
+                make_order(),
+                "user-001",
+                idempotency_key=TEST_IDEMPOTENCY_KEY,
+            )
 
         self.assertIsNone(order_repository.created_order)
 
@@ -331,7 +433,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(ShopUnavailableError):
-            await service.create_order(make_order(), "user-001")
+            await service.create_order(
+                make_order(),
+                "user-001",
+                idempotency_key=TEST_IDEMPOTENCY_KEY,
+            )
 
         self.assertIsNone(order_repository.created_order)
 
@@ -350,7 +456,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(ShopClosedError):
-            await service.create_order(make_order(), "user-001")
+            await service.create_order(
+                make_order(),
+                "user-001",
+                idempotency_key=TEST_IDEMPOTENCY_KEY,
+            )
 
         self.assertIsNone(order_repository.created_order)
 
@@ -368,7 +478,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
             ),
         )
 
-        await service.create_order(make_order(), "user-001")
+        await service.create_order(
+            make_order(),
+            "user-001",
+            idempotency_key=TEST_IDEMPOTENCY_KEY,
+        )
 
         self.assertIsNotNone(order_repository.created_order)
 
@@ -378,7 +492,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(ProductNotFoundError):
-            await service.create_order(make_order(), "user-001")
+            await service.create_order(
+                make_order(),
+                "user-001",
+                idempotency_key=TEST_IDEMPOTENCY_KEY,
+            )
 
         self.assertIsNone(order_repository.created_order)
 
@@ -388,7 +506,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(ProductUnavailableError):
-            await service.create_order(make_order(), "user-001")
+            await service.create_order(
+                make_order(),
+                "user-001",
+                idempotency_key=TEST_IDEMPOTENCY_KEY,
+            )
 
         self.assertIsNone(order_repository.created_order)
 
@@ -398,14 +520,16 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(ProductUnavailableError):
-            await service.create_order(make_order(), "user-001")
+            await service.create_order(
+                make_order(),
+                "user-001",
+                idempotency_key=TEST_IDEMPOTENCY_KEY,
+            )
 
         self.assertIsNone(order_repository.created_order)
 
     async def test_rejects_total_duplicate_quantity_above_stock(self):
-        service, order_repository, _, _ = self.make_service(
-            [make_product(stock=5)]
-        )
+        service, order_repository, _, _ = self.make_service([make_product(stock=5)])
         order = make_order(
             [
                 {"food_id": "food-001", "quantity": 3},
@@ -414,7 +538,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(InsufficientStockError):
-            await service.create_order(order, "user-001")
+            await service.create_order(
+                order,
+                "user-001",
+                idempotency_key=TEST_IDEMPOTENCY_KEY,
+            )
 
         self.assertIsNone(order_repository.created_order)
 
@@ -424,7 +552,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(MinimumOrderAmountError):
-            await service.create_order(make_order(), "user-001")
+            await service.create_order(
+                make_order(),
+                "user-001",
+                idempotency_key=TEST_IDEMPOTENCY_KEY,
+            )
 
         self.assertEqual(product_repository.reservations, [])
         self.assertIsNone(order_repository.created_order)
@@ -436,9 +568,157 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with self.assertRaises(InventoryReservationError):
-            await service.create_order(make_order(), "user-001")
+            await service.create_order(
+                make_order(),
+                "user-001",
+                idempotency_key=TEST_IDEMPOTENCY_KEY,
+            )
 
         self.assertIsNone(order_repository.created_order)
+
+    async def test_cancel_does_not_overwrite_concurrent_delivery(self):
+        class ConcurrentCancelRepository:
+            def __init__(self):
+                self.order_status = OrderStatus.PREPARING.value
+
+            async def query_order_status(
+                self,
+                order_id: str,
+                user_id: str,
+            ):
+                observed_status = self.order_status
+
+                # 模拟查询完成后，商家先把订单改成配送中
+                self.order_status = OrderStatus.DELIVERING.value
+
+                # Service拿到的仍是查询时的旧状态
+                return {"order_status": observed_status}
+
+            async def cancel_order(
+                self,
+                order_id: str,
+                user_id: str,
+                expected_status: str,
+                target_status: str,
+            ):
+                if self.order_status != expected_status:
+                    return False
+
+                self.order_status = target_status
+                return True
+
+        service, _, _, _ = self.make_service([make_product()])
+        repository = ConcurrentCancelRepository()
+        service.repository = repository
+
+        response = await service.cancel_order(
+            "order-001",
+            "user-001",
+        )
+
+        self.assertEqual(
+            repository.order_status,
+            OrderStatus.DELIVERING.value,
+        )
+        self.assertEqual(response.status, "error")
+
+    async def test_cancel_failed_returns_latest_delivering_status(self):
+        class MockOrderRepository:
+            def __init__(self):
+                self.mock_db = {
+                    "order-001": {
+                        "user_id": "user-001",
+                        "order_status": OrderStatus.PREPARING.value,
+                    }
+                }
+
+            async def query_order_status(
+                self,
+                order_id: str,
+                user_id: str,
+            ):
+                queried_status = self.mock_db[order_id]["order_status"]
+                self.mock_db[order_id]["order_status"] = OrderStatus.DELIVERING.value
+
+                return {"order_status": queried_status}
+
+            async def cancel_order(
+                self,
+                order_id: str,
+                user_id: str,
+                expected_status: str,
+                target_status: str,
+            ):
+                actual_status = self.mock_db[order_id]["order_status"]
+                if actual_status != expected_status:
+                    return False
+
+                self.mock_db[order_id]["order_status"] = target_status
+                return True
+
+        service, _, _, _ = self.make_service([make_product()])
+        repository = MockOrderRepository()
+        service.repository = repository
+
+        response = await service.cancel_order(
+            "order-001",
+            "user-001",
+        )
+
+        self.assertEqual(
+            repository.mock_db["order-001"]["order_status"],
+            OrderStatus.DELIVERING.value,
+        )
+        self.assertEqual(response.status, "error")
+        self.assertEqual(response.message, "Failed to cancel order")
+        self.assertEqual(
+            response.order_status,
+            OrderStatus.DELIVERING,
+        )
+
+    async def test_cancel_succeeds_when_status_is_unchanged(self):
+        class StableCancelRepository:
+            def __init__(self):
+                self.order_status = OrderStatus.PREPARING.value
+
+            async def query_order_status(
+                self,
+                order_id: str,
+                user_id: str,
+            ):
+                return {"order_status": self.order_status}
+
+            async def cancel_order(
+                self,
+                order_id: str,
+                user_id: str,
+                expected_status: str,
+                target_status: str,
+            ):
+                if self.order_status != expected_status:
+                    return False
+
+                self.order_status = target_status
+                return True
+
+        service, _, _, _ = self.make_service([make_product()])
+        repository = StableCancelRepository()
+        service.repository = repository
+
+        response = await service.cancel_order(
+            "order-001",
+            "user-001",
+        )
+
+        self.assertEqual(
+            repository.order_status,
+            OrderStatus.CANCELING.value,
+        )
+        self.assertEqual(response.status, "success")
+        self.assertEqual(
+            response.order_status,
+            OrderStatus.CANCELING,
+        )
 
 
 if __name__ == "__main__":

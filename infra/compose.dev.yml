@@ -1,0 +1,25 @@
+services:
+  redis:
+    image: redis:8.2-alpine
+    container_name: smartserve-redis
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+    ports:
+      - "127.0.0.1:6380:6379"
+    volumes:
+      - smartserve_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  smartserve_redis_data:
+    name: smartserve_redis_data

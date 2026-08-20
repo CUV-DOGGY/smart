@@ -1,7 +1,11 @@
 import ipaddress
+from pathlib import Path
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
@@ -15,7 +19,7 @@ class Settings(BaseSettings):
     MONGODB_DB_NAME: str = "smart_customer_service"
 
     # Redis 配置
-    REDIS_URL: str = "redis://localhost:6379"
+    REDIS_URL: str = "redis://127.0.0.1:6380/0"
     REDIS_CONNECT_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0, le=30)
     REDIS_SOCKET_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0, le=30)
     REDIS_HEALTH_CHECK_INTERVAL_SECONDS: int = Field(default=30, ge=0, le=300)
@@ -72,7 +76,7 @@ class Settings(BaseSettings):
         return values
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=BACKEND_ROOT / ".env",
         env_file_encoding="utf-8"
     )
 

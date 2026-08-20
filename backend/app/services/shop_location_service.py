@@ -5,7 +5,7 @@ from app.schemas.delivery import (
     ShopLocationUpdate,
     StructuredAddress,
 )
-from app.services.amap_service import AmapGeocodingService
+from app.ports.geocoding import GeocodingPort
 
 
 class ShopLocationService:
@@ -13,7 +13,7 @@ class ShopLocationService:
 
     def __init__(
         self,
-        amap_service: AmapGeocodingService,
+        amap_service: GeocodingPort,
         now_provider: Callable[[], datetime] | None = None,
     ):
         self.amap_service = amap_service

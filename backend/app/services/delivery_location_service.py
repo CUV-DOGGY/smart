@@ -6,10 +6,10 @@ from app.schemas.delivery import (
     ResolvedDeliveryLocation,
 )
 from app.schemas.shop import Shop
+from app.ports.geocoding import GeocodingPort
 from app.services.amap_service import (
     AmapAddressAmbiguousError,
     AmapAddressNotFoundError,
-    AmapGeocodingService,
     AmapServiceError,
 )
 
@@ -42,7 +42,7 @@ class OutsideDeliveryAreaError(RuntimeError):
 class DeliveryLocationService:
     def __init__(
         self,
-        amap_service: AmapGeocodingService | None = None,
+        amap_service: GeocodingPort | None = None,
     ):
         self.amap_service = amap_service
 

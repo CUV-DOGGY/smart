@@ -1,10 +1,7 @@
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
 
-
-class UsernameConflictError(RuntimeError):
-    """用户名唯一索引冲突。"""
-
+from app.ports.errors import UsernameConflictError
 
 class AuthRepository:
     def __init__(self, db: AsyncIOMotorDatabase):

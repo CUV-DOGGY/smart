@@ -12,8 +12,14 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.repositories.auth_repository import AuthRepository, UsernameConflictError
-from app.schemas.auth import RegisterRequest, RegisterResponse, TokenResponse
+from app.ports.errors import UsernameConflictError
+from app.ports.repositories import AuthRepositoryPort
+from app.schemas.auth import (
+    AuthenticatedUser,
+    RegisterRequest,
+    RegisterResponse,
+    TokenResponse,
+)
 
 
 class UsernameAlreadyExistsError(RuntimeError):
@@ -28,8 +34,17 @@ INVALID_PASSWORD_PLACEHOLDER = "invalid-login-input-for-dummy-hash"
 
 
 class AuthService:
-    def __init__(self, repository: AuthRepository):
+    def __init__(self, repository: AuthRepositoryPort):
         self.repository = repository
+
+    async def authenticated_user(self, user_id: str) -> AuthenticatedUser | None:
+        user = await self.repository.find_by_user_id(user_id)
+        if user is None or user.get("disabled", False):
+            return None
+        return AuthenticatedUser(
+            user_id=user["user_id"],
+            username=user["username"],
+        )
 
     async def register(self, request: RegisterRequest) -> RegisterResponse:
         username = normalize_username(request.username)

@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from app.repositories.address_repository import AddressRepository
+from app.ports.repositories import AddressRepositoryPort
 from app.schemas.address import (
     UserAddress,
     UserAddressActionResponse,
@@ -29,7 +29,7 @@ class AddressLimitExceededError(RuntimeError):
 class AddressService:
     def __init__(
         self,
-        repository: AddressRepository,
+        repository: AddressRepositoryPort,
         delivery_location_service: DeliveryLocationService,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:

@@ -15,13 +15,10 @@ from app.core.database_errors import (
     DatabaseUnavailableError,
     MONGO_UNAVAILABLE_EXCEPTIONS,
 )
+from app.ports.errors import OrderUniquenessConflictError
 
 
 _T = TypeVar("_T")
-
-
-class OrderUniquenessConflictError(RuntimeError):
-    """订单唯一标识或幂等键发生数据库唯一索引冲突。"""
 
 
 class OrderRepository:

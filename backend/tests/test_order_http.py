@@ -3,14 +3,14 @@ import unittest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.contants.order_status import OrderStatus
+from app.constants.order_status import OrderStatus
 from app.core.exception_handlers import setup_exception_handlers
 from app.dependencies.auth import get_current_user_id
 from app.routers.order_router import (
     get_order_service,
     router as order_router,
 )
-from app.services.order_services import OrderStateConflictError
+from app.services.order_service import OrderStateConflictError
 
 
 class ConflictOrderService:

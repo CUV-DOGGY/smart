@@ -4,7 +4,7 @@ from uuid import uuid4
 
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from app.contants.order_status import OrderStatus
+from app.constants.order_status import OrderStatus
 from app.repositories.order_repository import OrderRepository
 
 RUN_MONGO_INTEGRATION = os.getenv("RUN_MONGO_INTEGRATION") == "1"

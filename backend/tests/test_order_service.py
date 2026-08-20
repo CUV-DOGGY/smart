@@ -5,9 +5,9 @@ from app.schemas.address import UserAddress
 from app.schemas.order import OrderCreate
 from app.schemas.product import Product
 from app.schemas.shop import Shop
-from app.repositories.order_repository import OrderUniquenessConflictError
+from app.ports.errors import OrderUniquenessConflictError
 from app.services.delivery_location_service import DeliveryLocationService
-from app.services.order_services import (
+from app.services.order_service import (
     IdempotencyKeyConflictError,
     InsufficientStockError,
     InventoryReservationError,
@@ -15,14 +15,14 @@ from app.services.order_services import (
     OrderAddressNotFoundError,
     OrderNotFoundError,
     OrderStateConflictError,
-    OrderServices,
+    OrderService,
     ProductNotFoundError,
     ProductUnavailableError,
     ShopClosedError,
     ShopNotFoundError,
     ShopUnavailableError,
 )
-from app.contants.order_status import OrderStatus
+from app.constants.order_status import OrderStatus
 
 TEST_NOW = datetime(2026, 7, 20, 12, 0, tzinfo=timezone.utc)
 TEST_IDEMPOTENCY_KEY = "checkout-test-001"
@@ -229,7 +229,7 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         address_repository = FakeAddressRepository(
             None if no_address else (make_address() if address is None else address)
         )
-        service = OrderServices(
+        service = OrderService(
             order_repository,
             product_repository,
             shop_repository,

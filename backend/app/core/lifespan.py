@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from motor.motor_asyncio import AsyncIOMotorClient
 
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,8 +38,7 @@ async def startup_redis():
 
 def create_llm():
     """创建 LLM 实例"""
-    # 从 models.llm 获取已创建的 LLM
-    from app.models.llm import create_llm as _create_llm
+    from app.integrations.llm import create_llm as _create_llm
     return _create_llm()
 
 
@@ -62,6 +63,7 @@ async def lifespan(app: FastAPI):
     logger.info("应用启动中...")
     mongo_client = None
     redis_client = None
+    checkpointer = None
 
     try:
         # 1. 连接 MongoDB
@@ -102,6 +104,24 @@ async def lifespan(app: FastAPI):
         app.state.llm = create_llm()
         logger.info("LLM 初始化成功")
 
+        # 5. 编译一次持久化 Agent 图；运行时业务依赖按请求注入。
+        from app.agents import AgentRunner, build_service_agent
+        from app.integrations.agent_checkpoint import create_agent_checkpointer
+        from app.integrations.conversation_lock import ConversationRunLock
+
+        checkpointer = create_agent_checkpointer(
+            settings.MONGODB_URL,
+            settings.MONGODB_DB_NAME,
+        )
+        graph = build_service_agent(checkpointer)
+        agent_runner = AgentRunner(graph, checkpointer)
+        app.state.agent_runner = agent_runner
+        app.state.conversation_lock = ConversationRunLock(
+            redis_client,
+            lease_seconds=settings.AGENT_LOCK_LEASE_SECONDS,
+        )
+        logger.info("LangGraph Agent 初始化成功")
+
         logger.info("应用启动完成")
         logger.info("=" * 30)
         yield
@@ -114,6 +134,11 @@ async def lifespan(app: FastAPI):
             await shutdown_redis(redis_client)
         except Exception:
             logger.exception("Redis 连接关闭失败")
+        try:
+            if checkpointer is not None:
+                checkpointer.close()
+        except Exception:
+            logger.exception("Agent Checkpoint 连接关闭失败")
         try:
             await shutdown_db(mongo_client)
         except Exception:

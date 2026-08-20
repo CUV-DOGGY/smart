@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [switch]$Integration
+    [switch]$Integration,
+    [switch]$LlmIntegration
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,7 +11,9 @@ $frontendRoot = Join-Path $repoRoot "frontend"
 $integrationEnvironmentNames = @(
     "RUN_MONGO_INTEGRATION",
     "TEST_MONGODB_URL",
-    "TEST_MONGODB_DB_NAME"
+    "TEST_MONGODB_DB_NAME",
+    "RUN_LLM_INTEGRATION",
+    "MODEL_NAME"
 )
 $previousIntegrationEnvironment = @{}
 foreach ($name in $integrationEnvironmentNames) {
@@ -34,6 +37,15 @@ try {
         & uv run --project backend --locked --cache-dir $uvCache python -m unittest discover -s backend\tests -t backend -p "test_*_mongo_integration.py" -v
         if ($LASTEXITCODE -ne 0) {
             throw "MongoDB integration tests failed."
+        }
+    }
+
+    if ($LlmIntegration) {
+        $env:RUN_LLM_INTEGRATION = "1"
+        $env:MODEL_NAME = "deepseek-v4-flash"
+        & uv run --project backend --locked --cache-dir $uvCache python -m unittest discover -s backend\tests -t backend -p "test_llm_integration.py" -v
+        if ($LASTEXITCODE -ne 0) {
+            throw "Read-only LLM integration test failed."
         }
     }
 

@@ -3,19 +3,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
 
 from app.dependencies.auth import get_current_user_id
-from app.dependencies.database import get_db
 from app.dependencies.geocoding import (
     get_delivery_geocoding_rate_limiter,
-    get_delivery_location_service,
 )
-from app.repositories.address_repository import AddressRepository
+from app.dependencies.services import get_address_service
 from app.schemas.address import (
-    UserAddressActionResponse,
     UserAddressCreate,
     UserAddressData,
-    UserAddressListResponse,
     UserAddressPage,
-    UserAddressResponse,
     UserAddressUpdate,
 )
 from app.services.address_service import (
@@ -31,7 +26,6 @@ from app.services.delivery_geocoding_rate_limiter import (
 )
 from app.services.delivery_location_service import (
     AddressNeedsMapPickError,
-    DeliveryLocationService,
 )
 
 
@@ -40,19 +34,6 @@ AddressId = Annotated[
     str,
     Path(min_length=1, max_length=64, description="收货地址ID"),
 ]
-
-
-def get_address_repository(db=Depends(get_db)) -> AddressRepository:
-    return AddressRepository(db)
-
-
-def get_address_service(
-    repository: AddressRepository = Depends(get_address_repository),
-    delivery_location_service: DeliveryLocationService = Depends(
-        get_delivery_location_service
-    ),
-) -> AddressService:
-    return AddressService(repository, delivery_location_service)
 
 
 def _raise_address_error(exc: Exception) -> None:

@@ -2,40 +2,63 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from app.repositories.conversation_repository import ConversationRepository
+from app.agents.runner import (
+    AgentConfirmationRequiredError,
+    AgentConfirmationStaleError,
+    AgentRunner,
+)
+from app.agents.runtime import AgentRuntimeContext
+from app.integrations.conversation_lock import ConversationRunLock
+from app.ports.repositories import ConversationRepositoryPort
+from app.services.conversation_service import ConversationNotFoundError
 
 
 logger = logging.getLogger(__name__)
-SYSTEM_PROMPT = (
-    "你是 SmartServe 外卖平台客服。请使用简洁、准确、友好的中文回答。"
-    "本阶段没有业务工具，禁止声称已经修改订单、退款或地址；需要操作时应引导用户前往对应页面。"
-)
 
 
-class ConversationNotFoundError(RuntimeError):
-    pass
-
-
-class ChatService:
-    def __init__(self, repository: ConversationRepository, llm) -> None:
+class AgentChatService:
+    def __init__(
+        self,
+        repository: ConversationRepositoryPort,
+        runner: AgentRunner,
+        run_lock: ConversationRunLock,
+        runtime_context: AgentRuntimeContext,
+        *,
+        timeout_seconds: int,
+    ) -> None:
         self.repository = repository
-        self.llm = llm
+        self.runner = runner
+        self.run_lock = run_lock
+        self.runtime_context = runtime_context
+        self.timeout_seconds = timeout_seconds
 
-    async def prepare(
+    async def prepare_message(
         self,
         *,
         user_id: str,
         message: str,
         conversation_id: str | None,
-    ) -> tuple[str, list[dict]]:
+    ) -> str:
         if conversation_id is None:
-            conversation_id = await self.repository.create_conversation(
+            return await self.repository.create_conversation(
                 user_id,
                 self._title_from_message(message),
             )
-        elif not await self.repository.is_owned_by(conversation_id, user_id):
+        if not await self.repository.is_owned_by(conversation_id, user_id):
             raise ConversationNotFoundError
+        if await self.runner.pending_confirmation(user_id, conversation_id):
+            raise AgentConfirmationRequiredError
+        return conversation_id
 
+    async def accept_message(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        message: str,
+    ) -> list[dict]:
+        if await self.runner.pending_confirmation(user_id, conversation_id):
+            raise AgentConfirmationRequiredError
         saved = await self.repository.append_message(
             conversation_id=conversation_id,
             user_id=user_id,
@@ -44,88 +67,121 @@ class ChatService:
         )
         if saved is None:
             raise ConversationNotFoundError
-        history = await self.repository.recent_messages(
+        return await self.repository.recent_messages(
             conversation_id,
             user_id,
-            limit=20,
+            limit=30,
         )
-        return conversation_id, history
 
-    async def stream_reply(
+    async def ensure_resume(
         self,
         *,
-        conversation_id: str,
         user_id: str,
+        conversation_id: str,
+        interrupt_id: str,
+    ) -> None:
+        if not await self.repository.is_owned_by(conversation_id, user_id):
+            raise ConversationNotFoundError
+        pending = await self.runner.pending_confirmation(user_id, conversation_id)
+        if pending is None or pending.get("interrupt_id") != interrupt_id:
+            raise AgentConfirmationStaleError
+
+    async def stream_message(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        message: str,
         history: list[dict],
         is_disconnected: Callable[[], Awaitable[bool]],
-    ) -> AsyncIterator[dict[str, object]]:
-        messages = [("system", SYSTEM_PROMPT)]
-        messages.extend(
-            (document["role"], document["content"])
-            for document in history
-            if document.get("role") in {"user", "assistant"}
+    ) -> AsyncIterator[dict]:
+        source = self.runner.stream_message(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            message=message,
+            history=history,
+            context=self.runtime_context,
         )
+        async for event in self._persisted_stream(
+            source,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            is_disconnected=is_disconnected,
+        ):
+            yield event
+
+    async def stream_resume(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        interrupt_id: str,
+        decision: str,
+        is_disconnected: Callable[[], Awaitable[bool]],
+    ) -> AsyncIterator[dict]:
+        source = self.runner.stream_resume(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            interrupt_id=interrupt_id,
+            decision=decision,
+            context=self.runtime_context,
+        )
+        async for event in self._persisted_stream(
+            source,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            is_disconnected=is_disconnected,
+        ):
+            yield event
+
+    async def _persisted_stream(
+        self,
+        source: AsyncIterator[dict],
+        *,
+        user_id: str,
+        conversation_id: str,
+        is_disconnected: Callable[[], Awaitable[bool]],
+    ) -> AsyncIterator[dict]:
         chunks: list[str] = []
+        awaiting_confirmation = False
         try:
-            async with asyncio.timeout(60):
-                async for chunk in self.llm.astream(messages):
+            async with asyncio.timeout(self.timeout_seconds):
+                async for event in source:
                     if await is_disconnected():
                         return
-                    delta = self._chunk_text(getattr(chunk, "content", ""))
-                    if not delta:
-                        continue
-                    chunks.append(delta)
-                    yield {"type": "token", "delta": delta}
+                    if event.get("type") == "token":
+                        chunks.append(str(event.get("delta", "")))
+                    elif event.get("type") == "confirmation_required":
+                        awaiting_confirmation = True
+                    yield event
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception(
-                "Chat model stream failed conversation_id=%s",
-                conversation_id,
-            )
+            logger.exception("Agent run failed conversation_id=%s", conversation_id)
             yield {
                 "type": "error",
                 "code": "CHAT_MODEL_UNAVAILABLE",
                 "message": "智能客服暂时不可用，请稍后重试",
+                "retryable": True,
             }
             return
 
         response_text = "".join(chunks).strip()
-        if not response_text:
-            yield {
-                "type": "error",
-                "code": "CHAT_EMPTY_RESPONSE",
-                "message": "智能客服未返回有效内容，请重试",
-            }
-            return
-        message_id = await self.repository.append_message(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            role="assistant",
-            content=response_text,
-        )
-        if message_id is None:
-            yield {
-                "type": "error",
-                "code": "CONVERSATION_NOT_FOUND",
-                "message": "会话不存在或已被删除",
-            }
-            return
-        yield {"type": "done", "message_id": message_id}
+        message_id = None
+        if response_text:
+            message_id = await self.repository.append_message(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                role="assistant",
+                content=response_text,
+            )
+        yield {
+            "type": "done",
+            "outcome": "awaiting_confirmation" if awaiting_confirmation else "completed",
+            "message_id": message_id,
+        }
 
     @staticmethod
     def _title_from_message(message: str) -> str:
         normalized = " ".join(message.split())
         return normalized[:30] or "新会话"
-
-    @staticmethod
-    def _chunk_text(content: object) -> str:
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            texts = []
-            for item in content:
-                if isinstance(item, dict) and isinstance(item.get("text"), str):
-                    texts.append(item["text"])
-            return "".join(texts)
-        return ""

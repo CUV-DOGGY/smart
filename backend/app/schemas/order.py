@@ -1,7 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 from typing import List
 from datetime import datetime
-from app.contants.order_status import OrderStatus
+from app.constants.order_status import OrderStatus
 from app.schemas.delivery import (
     DeliveryLocationSnapshot,
     OrderDeliveryAddressSnapshot,

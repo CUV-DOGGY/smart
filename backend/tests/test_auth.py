@@ -26,7 +26,7 @@ from app.core.security import (
     verify_password,
 )
 from app.schemas.auth import RegisterRequest
-from app.schemas.chat import ChatRequest
+from app.schemas.conversation import ChatStreamRequest
 from app.schemas.order import OrderCancelRequest, OrderCreate
 from app.services.auth_service import AuthService, AuthenticationError
 from app.services.auth_rate_limiter import AuthRateLimiter, RateLimitExceeded
@@ -423,7 +423,7 @@ class TrustedIdentitySchemaTests(unittest.TestCase):
     def test_clients_cannot_submit_user_id(self):
         self.assertNotIn("user_id", OrderCreate.model_fields)
         self.assertNotIn("user_id", OrderCancelRequest.model_fields)
-        self.assertNotIn("user_id", ChatRequest.model_fields)
+        self.assertNotIn("user_id", ChatStreamRequest.model_fields)
 
 
 if __name__ == "__main__":

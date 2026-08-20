@@ -5,9 +5,9 @@ from fastapi.security import OAuth2PasswordBearer
 from jwt.exceptions import InvalidTokenError
 
 from app.core.security import decode_access_token
-from app.dependencies.database import get_db
-from app.repositories.auth_repository import AuthRepository
+from app.dependencies.services import get_auth_service
 from app.schemas.auth import AuthenticatedUser
+from app.services.auth_service import AuthService
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -15,7 +15,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
-    db=Depends(get_db),
+    service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> AuthenticatedUser:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -28,20 +28,10 @@ async def get_current_user(
     except InvalidTokenError:
         raise credentials_exception
 
-    user = await AuthRepository(db).find_by_user_id(user_id)
+    user = await service.authenticated_user(user_id)
     if user is None:
         raise credentials_exception
-
-    if user.get("disabled", False):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="用户已经被禁用",
-        )
-
-    return AuthenticatedUser(
-        user_id=user["user_id"],
-        username=user["username"],
-    )
+    return user
 
 
 async def get_current_user_id(

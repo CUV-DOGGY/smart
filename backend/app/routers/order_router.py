@@ -4,32 +4,26 @@ from fastapi import APIRouter, Depends, Header, Path, Query, status
 
 from app.core.api_errors import ApiError
 from app.dependencies.auth import get_current_user_id
-from app.dependencies.database import get_db
-from app.repositories.address_repository import AddressRepository
-from app.repositories.order_repository import OrderRepository
-from app.repositories.product_repository import ProductRepository
-from app.repositories.shop_repository import ShopRepository
+from app.dependencies.services import get_order_service
 from app.schemas.order import (
     OrderCancelResult,
     OrderCreate,
     OrderCreateResult,
-    OrderHistoryItem,
     OrderHistoryPage,
     OrderQueryByIdData,
 )
 from app.services.delivery_location_service import (
-    DeliveryLocationService,
     OutsideDeliveryAreaError,
     ShopDeliveryConfigurationError,
 )
-from app.services.order_services import (
+from app.services.order_service import (
     IdempotencyKeyConflictError,
     InsufficientStockError,
     InventoryReservationError,
     MinimumOrderAmountError,
     OrderAddressNotFoundError,
     OrderNotFoundError,
-    OrderServices,
+    OrderService,
     OrderStateConflictError,
     ProductNotFoundError,
     ProductUnavailableError,
@@ -40,37 +34,6 @@ from app.services.order_services import (
 
 
 router = APIRouter(prefix="/orders", tags=["外卖订单"])
-
-
-def get_order_repository(db=Depends(get_db)) -> OrderRepository:
-    return OrderRepository(db)
-
-
-def get_product_repository(db=Depends(get_db)) -> ProductRepository:
-    return ProductRepository(db)
-
-
-def get_shop_repository(db=Depends(get_db)) -> ShopRepository:
-    return ShopRepository(db)
-
-
-def get_address_repository(db=Depends(get_db)) -> AddressRepository:
-    return AddressRepository(db)
-
-
-def get_order_service(
-    repository: OrderRepository = Depends(get_order_repository),
-    product_repository: ProductRepository = Depends(get_product_repository),
-    shop_repository: ShopRepository = Depends(get_shop_repository),
-    address_repository: AddressRepository = Depends(get_address_repository),
-) -> OrderServices:
-    return OrderServices(
-        repository,
-        product_repository,
-        shop_repository,
-        address_repository,
-        DeliveryLocationService(),
-    )
 
 
 @router.post(
@@ -90,7 +53,7 @@ async def create_order(
             pattern=r"^[A-Za-z0-9._:-]+$",
         ),
     ],
-    service: OrderServices = Depends(get_order_service),
+    service: OrderService = Depends(get_order_service),
 ) -> OrderCreateResult:
     try:
         response = await service.create_order(
@@ -134,12 +97,12 @@ async def create_order(
 @router.get("", response_model=OrderHistoryPage)
 async def list_orders(
     user_id: Annotated[str, Depends(get_current_user_id)],
-    repository: Annotated[OrderRepository, Depends(get_order_repository)],
+    service: Annotated[OrderService, Depends(get_order_service)],
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
     cursor: Annotated[str | None, Query(max_length=512)] = None,
 ) -> OrderHistoryPage:
     try:
-        documents, next_cursor = await repository.query_order_history_page(
+        items, next_cursor = await service.list_orders_page(
             user_id,
             limit=limit,
             cursor=cursor,
@@ -147,7 +110,7 @@ async def list_orders(
     except ValueError as exc:
         raise _api_error(422, "INVALID_CURSOR", "分页游标无效") from exc
     return OrderHistoryPage(
-        items=[OrderHistoryItem.model_validate(item) for item in documents],
+        items=items,
         next_cursor=next_cursor,
     )
 
@@ -156,7 +119,7 @@ async def list_orders(
 async def get_order(
     order_id: Annotated[str, Path(min_length=1, max_length=64)],
     user_id: Annotated[str, Depends(get_current_user_id)],
-    service: OrderServices = Depends(get_order_service),
+    service: OrderService = Depends(get_order_service),
 ) -> OrderQueryByIdData:
     response = await service.query_order_by_id(order_id, user_id)
     if response.order is None:
@@ -168,7 +131,7 @@ async def get_order(
 async def cancel_order(
     order_id: Annotated[str, Path(min_length=1, max_length=64)],
     user_id: Annotated[str, Depends(get_current_user_id)],
-    service: OrderServices = Depends(get_order_service),
+    service: OrderService = Depends(get_order_service),
 ) -> OrderCancelResult:
     try:
         response = await service.cancel_order(order_id, user_id)

@@ -11,8 +11,7 @@ from app.core.client_ip import get_client_ip
 from app.core.security import PasswordHashCapacityError
 from app.dependencies.cache import get_redis
 from app.dependencies.auth import get_current_user
-from app.dependencies.database import get_db
-from app.repositories.auth_repository import AuthRepository
+from app.dependencies.services import get_auth_service
 from app.schemas.auth import (
     AuthenticatedUser,
     RegisterRequest,
@@ -40,16 +39,6 @@ async def me(
     current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
 ) -> AuthenticatedUser:
     return current_user
-
-
-def get_auth_repository(db=Depends(get_db)) -> AuthRepository:
-    return AuthRepository(db)
-
-
-def get_auth_service(
-    repository: Annotated[AuthRepository, Depends(get_auth_repository)],
-) -> AuthService:
-    return AuthService(repository)
 
 
 def get_auth_rate_limiter(

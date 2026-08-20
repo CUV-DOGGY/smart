@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     REDIS_SOCKET_TIMEOUT_SECONDS: float = Field(default=2.0, gt=0, le=30)
     REDIS_HEALTH_CHECK_INTERVAL_SECONDS: int = Field(default=30, ge=0, le=300)
 
+    # Agent execution boundaries
+    AGENT_RUN_TIMEOUT_SECONDS: int = Field(default=90, ge=10, le=300)
+    AGENT_LOCK_LEASE_SECONDS: int = Field(default=120, ge=30, le=600)
+
     # 高德 Web 服务
     AMAP_WEB_SERVICE_KEY: SecretStr
     AMAP_BASE_URL: str = "https://restapi.amap.com"

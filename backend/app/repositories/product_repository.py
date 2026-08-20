@@ -10,6 +10,18 @@ from app.core.database_errors import (
 )
 
 
+_PRODUCT_MODEL_PROJECTION: dict[str, int] = {
+    "_id": 0,
+    "food_id": 1,
+    "shop_id": 1,
+    "food_name": 1,
+    "price": 1,
+    "stock": 1,
+    "is_listed": 1,
+    "is_available": 1,
+}
+
+
 class ProductRepository:
     def __init__(self, db: AsyncIOMotorDatabase):
         self.product_collection = db["products"]
@@ -38,7 +50,7 @@ class ProductRepository:
                     "is_listed": True,
                     "is_available": True,
                 },
-                {"_id": 0},
+                _PRODUCT_MODEL_PROJECTION,
             ).sort("food_name", 1).to_list(length=limit)
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(
@@ -58,16 +70,7 @@ class ProductRepository:
                     "shop_id": shop_id,
                     "food_id": {"$in": food_ids},
                 },
-                {
-                    "_id": 0,
-                    "food_id": 1,
-                    "shop_id": 1,
-                    "food_name": 1,
-                    "price": 1,
-                    "stock": 1,
-                    "is_listed": 1,
-                    "is_available": 1,
-                },
+                _PRODUCT_MODEL_PROJECTION,
                 session=session,
             ).to_list(length=len(food_ids))
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:

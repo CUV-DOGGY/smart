@@ -1,8 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 
 export function MessageList({ messages, streamingText }) {
-  const bottomRef = useRef(null);
-  useEffect(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), [messages, streamingText]);
+  const listRef = useRef(null);
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [messages, streamingText]);
+
   if (!messages.length && !streamingText) {
     return (
       <div className="chat-welcome">
@@ -13,10 +18,15 @@ export function MessageList({ messages, streamingText }) {
     );
   }
   return (
-    <div className="message-list">
-      {messages.map((message) => <Message key={message.message_id} role={message.role} content={message.content} />)}
+    <div className="message-list" ref={listRef}>
+      {messages.map((message, index) => (
+        <Message
+          key={message.message_id || `${message.role || 'unknown'}-${index}`}
+          role={message.role}
+          content={safeMessageText(message.content)}
+        />
+      ))}
       {streamingText && <Message role="assistant" content={streamingText} streaming />}
-      <div ref={bottomRef} />
     </div>
   );
 }
@@ -28,4 +38,10 @@ function Message({ role, content, streaming = false }) {
       <div className="message-bubble">{content}{streaming && <span className="cursor" />}</div>
     </div>
   );
+}
+
+function safeMessageText(content) {
+  if (typeof content === 'string') return content;
+  if (content == null) return '';
+  return '消息内容格式异常，请刷新会话后重试。';
 }

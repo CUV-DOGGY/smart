@@ -40,8 +40,12 @@ const chatSlice = createSlice({
       state.statusLabel = '正在理解问题';
     },
     setConversationId(state, action) { state.currentId = action.payload; },
-    appendDelta(state, action) { state.streamingText += action.payload; },
-    setStatus(state, action) { state.statusLabel = action.payload; },
+    appendDelta(state, action) {
+      if (typeof action.payload === 'string') state.streamingText += action.payload;
+    },
+    setStatus(state, action) {
+      state.statusLabel = typeof action.payload === 'string' ? action.payload : null;
+    },
     setPendingConfirmation(state, action) { state.pendingConfirmation = action.payload; },
     startResume(state) {
       state.isStreaming = true;

@@ -120,6 +120,9 @@ textarea { resize: vertical; }
 .chat-composer { display: flex; align-items: flex-end; gap: 10px; margin: 0 clamp(20px, 7vw, 100px) 22px; padding: 9px; border: 1px solid var(--line); border-radius: 15px; box-shadow: 0 8px 25px rgba(19,62,57,.08); }
 .chat-composer textarea { border: 0; box-shadow: none; background: transparent; }
 .chat-error { margin: 0 clamp(20px, 7vw, 100px) 10px; display: flex; justify-content: space-between; align-items: center; }
+.feature-error { min-height: 100vh; display: grid; place-content: center; justify-items: center; gap: 10px; padding: 30px; text-align: center; color: var(--muted); }
+.feature-error h2, .feature-error p { margin: 0; }
+.feature-error h2 { color: var(--ink); }
 
 .address-form { margin-bottom: 24px; }
 .map-pick-button { border: 1px dashed #7abdb5; border-radius: 11px; padding: 12px; color: var(--brand); background: #f4fcfa; text-align: left; }

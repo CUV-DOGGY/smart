@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.core.api_errors import ApiError
 from app.core.exception_handlers import setup_exception_handlers
-from app.core.middleware import RequestIdMiddleware
+from app.core.middleware import RequestIdMiddleware, setup_middleware
 
 
 class InputModel(BaseModel):
@@ -59,6 +59,32 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(
             response.headers["X-Request-ID"],
             response.json()["request_id"],
+        )
+
+
+class LocalDevelopmentCorsTests(unittest.TestCase):
+    def test_dev_script_ipv4_origin_is_allowed(self):
+        app = FastAPI()
+        setup_middleware(app)
+
+        @app.post("/auth/register")
+        async def register():
+            return {"ok": True}
+
+        with TestClient(app) as client:
+            response = client.options(
+                "/auth/register",
+                headers={
+                    "Origin": "http://127.0.0.1:5173",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "content-type",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["Access-Control-Allow-Origin"],
+            "http://127.0.0.1:5173",
         )
 
 

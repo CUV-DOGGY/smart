@@ -1,17 +1,18 @@
 # SmartServe AI
 
-SmartServe AI 是面向外卖交易履约场景的全栈智能客服项目。当前第二阶段已经打通真实登录态、流式 AI 会话、地址与地图、商品目录、订单创建/查询/取消，并以主仓库的 Service 层作为唯一业务入口。
+SmartServe AI 是面向外卖交易履约场景的全栈智能客服项目。第三阶段已经将聊天升级为可持久化的 LangGraph Service Agent：它能查询真实业务数据、多轮补齐参数，并且只在用户点击结构化确认卡后执行受控写操作。
 
 ## 能力概览
 
 - OAuth2 密码登录、JWT 身份恢复、Redis 认证限流
-- DeepSeek 兼容模型 SSE 流式回答、MongoDB 会话与消息历史
+- DeepSeek V4 Flash 工具调用与统一 SSE 事件流
+- MongoDB Agent Checkpoint、跨进程恢复与可见会话历史
+- Redis 会话运行锁、90 秒运行超时与写操作确认中断
 - 收货地址 CRUD、默认地址、高德地图选点、服务端二次地理校验
 - 店铺/商品只读目录、服务端定价、库存事务预占、配送半径校验
 - 幂等下单、订单历史/详情/取消和用户数据隔离
 - 统一 API 错误体、请求 ID、基础设施健康检查
-
-Agent、RAG、业务工具调用和 MCP 属于后续阶段；当前聊天模型不会声称已经执行订单或地址操作。
+- 九个 Service Tools，写操作批准前零副作用
 
 ## 分层架构
 
@@ -27,20 +28,26 @@ frontend/src
    └─ order/             目录、下单和订单页面
 
 backend/app
-├─ routers/              HTTP 与鉴权边界
-├─ services/             业务规则和用例编排
-├─ repositories/         MongoDB 持久化边界
+├─ routers/              HTTP、鉴权与 SSE 协议边界
+├─ dependencies/         Repository/Service 请求级装配
+├─ services/             业务规则和用例编排，只依赖 Port
+├─ ports/                认证、地址、目录、订单、会话和地理协议
+├─ repositories/         MongoDB Port 适配器
+├─ agents/               State、Graph、Runner 与 Runtime Context
+├─ tools/                参数校验、Service 调用与安全 DTO
+├─ prompts/              Agent 系统约束
+├─ integrations/         LLM、Checkpoint 与 Redis 会话锁
 ├─ schemas/              公共请求与响应模型
 └─ core/                 生命周期、中间件、错误和安全
 ```
 
-业务域不直接访问其他域的内部状态。前端页面只使用本域 API；地址域只接收地图适配器产生的标准位置对象，不依赖高德 SDK 类型。后端 Router 不直接拼 MongoDB 查询，Service 不读取 HTTP 请求。
+业务域不直接访问其他域的内部状态。Router 和 Service 均不导入具体 Repository；装配集中在 `dependencies/services.py`。Agent 工具只能调用 Service，`user_id` 通过 Runtime Context 注入，不进入模型参数或持久化 State。详细流程见 [Agent 工作流](docs/agent-workflow.md)。
 
 ## 技术与版本
 
 - Python 3.14.5：`E:\python312\python.exe`
 - Node.js 24.15.0、npm 11
-- FastAPI、Motor、Redis、LangChain OpenAI
+- FastAPI、Motor、Redis、LangChain OpenAI、LangGraph 1.2
 - React 19、Redux Toolkit、React Router、Vite
 - MongoDB 8.3 单节点副本集 `rs0`
 - Redis 8.2 Alpine，Docker Desktop
@@ -74,7 +81,7 @@ npm install package-name
 后端真实配置放在被忽略的 `backend/.env`：
 
 ```dotenv
-MODEL_NAME=your-model-name
+MODEL_NAME=deepseek-v4-flash
 DEEPSEEK_API_KEY=replace-with-your-api-key
 DEEPSEEK_BASE_URL=https://api.example.com
 MONGODB_URL=mongodb://localhost:27017/?replicaSet=rs0
@@ -83,6 +90,8 @@ REDIS_URL=redis://127.0.0.1:6380/0
 AMAP_WEB_SERVICE_KEY=replace-with-your-amap-web-service-key
 JWT_SECRET_KEY=replace-with-at-least-32-random-characters
 RATE_LIMIT_KEY_SECRET=replace-with-a-different-32-character-secret
+AGENT_RUN_TIMEOUT_SECONDS=90
+AGENT_LOCK_LEASE_SECONDS=120
 ```
 
 前端本地配置放在 `frontend/.env.local`：
@@ -131,11 +140,14 @@ Redis 容器为 `smartserve-redis`，只绑定 `127.0.0.1:6380`；6379 保留给
 ### 智能客服
 
 - `POST /chat/stream`
+- `POST /chat/resume`
 - `GET /conversations`
 - `GET /conversations/{conversation_id}/messages`
 - `DELETE /conversations/{conversation_id}`
 
-流事件依次为 `meta`、若干 `token`、`done`；模型失败时为 `error`。客户端不提交 UID，所有权只由 Bearer Token 决定。
+流事件为 `meta`、`status`、`token`、`confirmation_required`、`done` 或 `error`。`done.outcome` 为 `completed` 或 `awaiting_confirmation`。客户端不提交 UID，所有权只由 Bearer Token 决定。
+
+只读工具直接执行；创建订单、取消订单、设置默认地址和删除地址会返回确认卡。`/chat/resume` 只接受原 `interrupt_id` 加 `approve|reject`，自然语言“确认”不能执行写操作，确认时也不能替换服务端冻结的参数。
 
 ### 地址、目录与订单
 
@@ -163,7 +175,7 @@ Redis 容器为 `smartserve-redis`，只绑定 `127.0.0.1:6380`；6379 保留给
 }
 ```
 
-SSE 已开始后的模型错误使用同样的 `code/message/request_id` 字段发送 `error` 事件，不向浏览器返回连接串、密钥或异常栈。
+SSE 已开始后的模型错误使用同样的 `code/message/request_id` 字段发送 `error` 事件，不向浏览器返回连接串、工具参数、密钥或异常栈。并发请求返回 `CONVERSATION_BUSY`，待确认与过期确认分别返回 `AGENT_CONFIRMATION_REQUIRED`、`AGENT_CONFIRMATION_STALE`。
 
 ## 测试
 
@@ -180,6 +192,14 @@ SSE 已开始后的模型错误使用同样的 `code/message/request_id` 字段�
 ```
 
 集成测试只使用以 `_test` 结尾的数据库，并清理自身创建的订单、会话与消息。LLM 单元测试使用假模型，不消耗真实 API 额度。
+
+在网络和真实 DeepSeek 配置可用时，仅运行一次只读 Tool Call 验证：
+
+```powershell
+.\scripts\test.ps1 -LlmIntegration
+```
+
+该开关仅在当前进程覆盖 `MODEL_NAME=deepseek-v4-flash`，不会修改 `backend/.env`，测试不会调用任何写工具。
 
 ## 常见问题
 
@@ -201,6 +221,6 @@ SSE 已开始后的模型错误使用同样的 `code/message/request_id` 字段�
 
 ## 后续融合路线
 
-1. 将现有 Service 注册为 LangGraph 工具，客服通过工具而不是直接访问 Repository。
+1. 增加知识库 RAG、标准问答数据集与 Agent 离线评测。
 2. 迁移地图 Demo 的 MCP Schema 与严格校验测试，不复制业务实现。
-3. 增加知识库 RAG、Agent 评测集、链路追踪、成本与延迟指标。
+3. 增加 LangSmith/自建链路追踪、成本、延迟和工具成功率指标。

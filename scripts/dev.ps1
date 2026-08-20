@@ -44,7 +44,21 @@ if ($LASTEXITCODE -ne 0) { throw "Docker Desktop is not running." }
 & $dockerPath compose -f $composeFile up -d --wait redis
 if ($LASTEXITCODE -ne 0) { throw "Redis failed to start." }
 
-& $pythonPath -c "from pymongo import MongoClient; from redis import Redis; m=MongoClient('$localMongoUrl', serverSelectionTimeoutMS=2000); assert m.admin.command('ping')['ok'] == 1; assert Redis.from_url('$localRedisUrl', socket_connect_timeout=2).ping(); print('MongoDB and Redis are ready')"
+$readinessCode = @"
+from pymongo import MongoClient
+from redis import Redis
+
+mongo = MongoClient('$localMongoUrl', serverSelectionTimeoutMS=2000)
+redis = Redis.from_url('$localRedisUrl', socket_connect_timeout=2)
+try:
+    assert mongo.admin.command('ping')['ok'] == 1
+    assert redis.ping()
+    print('MongoDB and Redis are ready')
+finally:
+    redis.close()
+    mongo.close()
+"@
+& $pythonPath -c $readinessCode
 if ($LASTEXITCODE -ne 0) { throw "MongoDB or Redis readiness check failed." }
 
 $portOwners = @(

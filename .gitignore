@@ -6,13 +6,18 @@
 **/.venv/
 **/venv/
 **/.uv-cache/
+**/node_modules/
+**/.npm-cache/
 **/__pycache__/
 *.py[cod]
 .pytest_cache/
 
 # Local secrets and runtime output
 **/.env
+**/.env.local
+**/.env.*.local
 *.log
+.runtime-logs/
 .coverage
 htmlcov/
 

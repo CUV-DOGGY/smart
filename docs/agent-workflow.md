@@ -57,8 +57,8 @@ Redis 锁按用户和会话的 SHA-256 摘要分区，锁租约 120 秒。一个
 - `meta`：`conversation_id`、`run_id`
 - `status`：思考、校验或调用业务服务，不包含工具参数
 - `token`：最终回复增量
-- `confirmation_required`：`interrupt_id`、动作和安全摘要
+- `confirmation_required`：`interrupt_id`、动作和安全摘要；创建订单时额外携带服务端计价的 `presentation`，前端据此渲染商品、配送地址和金额确认表
 - `done`：`completed` 或 `awaiting_confirmation`
 - `error`：标准错误码、消息、`request_id`、`retryable`
 
-前端在待确认时隐藏普通输入框，仅显示批准和拒绝。会话历史接口返回可选的 `pending_confirmation`，因此页面刷新或切换会话后仍能恢复确认卡。
+前端在待确认时隐藏普通输入框，仅显示批准和拒绝。订单确认表不解析模型文本，价格与地址来自后端只读预览；批准后服务端仍会重新校验库存、价格和配送范围。会话历史接口返回可选的 `pending_confirmation`，因此页面刷新或切换会话后仍能恢复确认卡。

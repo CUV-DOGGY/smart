@@ -22,6 +22,33 @@ class FakeModel:
 class FakeRegistry:
     def __init__(self):
         self.calls = []
+        self.confirmation_calls = []
+
+    async def prepare_confirmation(self, name, arguments, *, user_id):
+        self.confirmation_calls.append((name, arguments, user_id))
+        result = {"ok": True, "summary": f"确认执行 {name}"}
+        if name == "create_order":
+            result["presentation"] = {
+                "kind": "order",
+                "shop_id": arguments["shop_id"],
+                "shop_name": "测试店铺",
+                "address_id": arguments["address_id"],
+                "receiver_name": "测试用户",
+                "receiver_phone": "138****8000",
+                "delivery_address": "北京市朝阳区测试路1号",
+                "items": [{
+                    "food_id": "food-001",
+                    "food_name": "测试商品",
+                    "quantity": 2,
+                    "unit_price": 12.5,
+                    "line_total": 25.0,
+                }],
+                "goods_amount": 25.0,
+                "delivery_fee": 5.0,
+                "total_price": 30.0,
+                "currency": "CNY",
+            }
+        return result
 
     async def execute(self, name, arguments, *, user_id, action_id):
         self.calls.append((name, arguments, user_id, action_id))
@@ -98,6 +125,31 @@ class AgentGraphTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(len(registry.calls), 1)
         self.assertEqual(result["messages"][-1].content, "已提交取消申请。")
+
+    async def test_create_order_interrupt_contains_structured_preview(self):
+        graph, registry, context, config = self.make([
+            tool_call(
+                "create_order",
+                {
+                    "shop_id": "shop-001",
+                    "address_id": "address-001",
+                    "items": [{"food_id": "food-001", "quantity": 2}],
+                },
+            )
+        ])
+
+        await graph.ainvoke(
+            {"messages": [HumanMessage(content="帮我下单")]},
+            config=config,
+            context=context,
+        )
+
+        snapshot = await graph.aget_state(config)
+        payload = snapshot.tasks[0].interrupts[0].value
+        self.assertEqual(payload["presentation"]["kind"], "order")
+        self.assertEqual(payload["presentation"]["total_price"], 30.0)
+        self.assertEqual(registry.calls, [])
+        self.assertEqual(registry.confirmation_calls[0][2], "user-001")
 
     async def test_reject_never_calls_write_service(self):
         graph, registry, context, config = self.make(

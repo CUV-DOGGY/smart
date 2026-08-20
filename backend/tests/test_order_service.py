@@ -628,6 +628,25 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
             OrderStatus.DELIVERING,
         )
 
+    async def test_preview_reuses_pricing_without_reserving_or_writing(self):
+        service, order_repository, product_repository, _ = self.make_service(
+            [make_product()]
+        )
+
+        preview = await service.preview_order(make_order(), "user-001")
+
+        self.assertEqual(preview.kind, "order")
+        self.assertEqual(preview.shop_name, "Test shop")
+        self.assertEqual(preview.receiver_name, "Test User")
+        self.assertEqual(preview.delivery_address, "北京市朝阳区Test address")
+        self.assertEqual(preview.items[0].food_name, "Test food")
+        self.assertEqual(preview.items[0].unit_price, 12.5)
+        self.assertEqual(preview.items[0].line_total, 25.0)
+        self.assertEqual(preview.total_price, 30.0)
+        self.assertEqual(product_repository.reservations, [])
+        self.assertEqual(order_repository.transaction_count, 0)
+        self.assertIsNone(order_repository.created_order)
+
     async def test_cancel_failed_returns_latest_delivering_status(self):
         class MockOrderRepository:
             def __init__(self):

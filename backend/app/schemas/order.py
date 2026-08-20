@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import List
+from typing import List, Literal
 from datetime import datetime
 from app.constants.order_status import OrderStatus
 from app.schemas.delivery import (
@@ -43,6 +43,33 @@ class OrderCreate(BaseModel):
     shop_id: str = Field(min_length=1, max_length=64)
     address_id: str = Field(min_length=1, max_length=64)
     items: List[OrderCreateItem] = Field(min_length=1, max_length=50)
+
+
+class OrderConfirmationItem(BaseModel):
+    """Safe product snapshot shown before an agent-created order is approved."""
+
+    food_id: str
+    food_name: str
+    quantity: int = Field(ge=1)
+    unit_price: float = Field(ge=0, allow_inf_nan=False)
+    line_total: float = Field(ge=0, allow_inf_nan=False)
+
+
+class OrderConfirmationPreview(BaseModel):
+    """Read-only, server-priced presentation model for an order confirmation."""
+
+    kind: Literal["order"] = "order"
+    shop_id: str
+    shop_name: str
+    address_id: str
+    receiver_name: str
+    receiver_phone: str
+    delivery_address: str
+    items: List[OrderConfirmationItem]
+    goods_amount: float = Field(ge=0, allow_inf_nan=False)
+    delivery_fee: float = Field(ge=0, allow_inf_nan=False)
+    total_price: float = Field(ge=0, allow_inf_nan=False)
+    currency: Literal["CNY"] = "CNY"
 
 
 class OrderQueryByIdData(BaseModel):

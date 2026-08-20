@@ -3,6 +3,7 @@ import json
 import math
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -23,6 +24,8 @@ from app.schemas.order import (
     OrderCancelResponse,
     OrderCreate,
     OrderCreateResponse,
+    OrderConfirmationItem,
+    OrderConfirmationPreview,
     OrderHistoryItem,
     OrderHistoryQueryResponse,
     OrderQueryByIdData,
@@ -91,6 +94,21 @@ class OrderStateConflictError(RuntimeError):
         self.current_status = current_status
 
 
+@dataclass(frozen=True)
+class _PreparedOrder:
+    """Validated and priced order data shared by preview and creation."""
+
+    requested_quantities: dict[str, int]
+    products_by_id: dict[str, Product]
+    shop: Shop
+    items: list[dict]
+    delivery_snapshot: OrderDeliveryAddressSnapshot
+    delivery_address_text: str
+    goods_amount: float
+    delivery_fee: float
+    total_price: float
+
+
 class OrderService:
     def __init__(
         self,
@@ -115,11 +133,7 @@ class OrderService:
         *,
         idempotency_key: str,
     ):
-        requested_quantities: dict[str, int] = {}
-        for item in order.items:
-            requested_quantities[item.food_id] = (
-                requested_quantities.get(item.food_id, 0) + item.quantity
-            )
+        requested_quantities = self._requested_quantities(order)
 
         request_hash = self._build_idempotency_request_hash(
             order=order,
@@ -141,88 +155,16 @@ class OrderService:
             raise RuntimeError("now_provider must return a timezone-aware datetime")
 
         async def create_in_transaction(session):
-            saved_address = await self.address_repository.find_by_id(
-                user_id=user_id,
-                address_id=order.address_id,
+            prepared = await self._prepare_order(
+                order,
+                user_id,
+                current_time=create_time,
                 session=session,
             )
-            if saved_address is None:
-                raise OrderAddressNotFoundError("Address not found")
 
-            shop = await self.shop_repository.find_by_shop_id(
-                order.shop_id,
-                session=session,
-            )
-            self._validate_shop(shop, create_time)
-            address_input = DeliveryAddressInput(
-                province=saved_address.province,
-                city=saved_address.city,
-                district=saved_address.district,
-                detail_address=saved_address.detail_address,
-                longitude=saved_address.longitude,
-                latitude=saved_address.latitude,
-            )
-            resolved_delivery_location = ResolvedDeliveryLocation(
-                longitude=saved_address.longitude,
-                latitude=saved_address.latitude,
-                formatted_address=saved_address.formatted_address,
-                province=saved_address.province,
-                city=saved_address.city,
-                district=saved_address.district,
-                adcode=saved_address.adcode,
-                location_source=saved_address.location_source,
-                verification_status=(saved_address.verification_status),
-            )
-            location_snapshot = self.delivery_location_service.build_snapshot(
-                address=address_input,
-                resolved=resolved_delivery_location,
-                shop=shop,
-            )
-            delivery_snapshot = OrderDeliveryAddressSnapshot(
-                **location_snapshot.model_dump(),
-                address_id=saved_address.address_id,
-                receiver_name=saved_address.receiver_name,
-                receiver_phone=saved_address.receiver_phone,
-                address_version=saved_address.version,
-            )
-
-            products = await self.product_repository.find_by_shop_and_food_ids(
-                order.shop_id,
-                list(requested_quantities),
-                session=session,
-            )
-            products_by_id = {product.food_id: product for product in products}
-            self._validate_products(
-                requested_quantities=requested_quantities,
-                products_by_id=products_by_id,
-            )
-
-            order_items = []
-            for food_id, quantity in requested_quantities.items():
-                product = products_by_id[food_id]
-                order_items.append(
-                    {
-                        "food_id": product.food_id,
-                        "food_name": product.food_name,
-                        "quantity": quantity,
-                        "price": product.price,
-                    }
-                )
-
-            goods_amount = math.fsum(
-                item["price"] * item["quantity"] for item in order_items
-            )
-            if goods_amount < shop.minimum_order_amount:
-                raise MinimumOrderAmountError(
-                    "Order amount does not meet the shop minimum"
-                )
-
-            delivery_fee = shop.delivery_fee
-            total_price = math.fsum([goods_amount, delivery_fee])
-
-            for food_id, quantity in requested_quantities.items():
+            for food_id, quantity in prepared.requested_quantities.items():
                 reserved = await self.product_repository.reserve_stock(
-                    product=products_by_id[food_id],
+                    product=prepared.products_by_id[food_id],
                     quantity=quantity,
                     session=session,
                 )
@@ -234,15 +176,15 @@ class OrderService:
             order_data = {
                 "order_id": order_id,
                 "user_id": user_id,
-                "shop_id": shop.shop_id,
-                "shop_name": shop.shop_name,
-                "items": order_items,
+                "shop_id": prepared.shop.shop_id,
+                "shop_name": prepared.shop.shop_name,
+                "items": prepared.items,
                 "order_status": OrderStatus.PENDING_PAYMENT.value,
                 "create_time": create_time.astimezone(timezone.utc),
-                "delivery_address": delivery_snapshot.model_dump(),
-                "goods_amount": goods_amount,
-                "delivery_fee": delivery_fee,
-                "total_price": total_price,
+                "delivery_address": prepared.delivery_snapshot.model_dump(),
+                "goods_amount": prepared.goods_amount,
+                "delivery_fee": prepared.delivery_fee,
+                "total_price": prepared.total_price,
                 "idempotency_key": idempotency_key,
                 "idempotency_request_hash": request_hash,
             }
@@ -255,10 +197,10 @@ class OrderService:
                 message="Order created successfully",
                 order_id=order_id,
                 order_status=OrderStatus.PENDING_PAYMENT,
-                goods_amount=goods_amount,
-                delivery_fee=delivery_fee,
-                total_price=total_price,
-                delivery_distance_meters=(delivery_snapshot.distance_meters),
+                goods_amount=prepared.goods_amount,
+                delivery_fee=prepared.delivery_fee,
+                total_price=prepared.total_price,
+                delivery_distance_meters=(prepared.delivery_snapshot.distance_meters),
             )
 
         try:
@@ -278,6 +220,144 @@ class OrderService:
                 existing_order,
                 request_hash=request_hash,
             )
+
+    async def preview_order(
+        self,
+        order: OrderCreate,
+        user_id: str,
+    ) -> OrderConfirmationPreview:
+        """Validate and price an order without reserving stock or writing data."""
+
+        current_time = self.now_provider()
+        if current_time.tzinfo is None:
+            raise RuntimeError("now_provider must return a timezone-aware datetime")
+        prepared = await self._prepare_order(
+            order,
+            user_id,
+            current_time=current_time,
+            session=None,
+        )
+        return OrderConfirmationPreview(
+            shop_id=prepared.shop.shop_id,
+            shop_name=prepared.shop.shop_name,
+            address_id=prepared.delivery_snapshot.address_id,
+            receiver_name=prepared.delivery_snapshot.receiver_name,
+            receiver_phone=prepared.delivery_snapshot.receiver_phone,
+            delivery_address=prepared.delivery_address_text,
+            items=[
+                OrderConfirmationItem(
+                    food_id=item["food_id"],
+                    food_name=item["food_name"],
+                    quantity=item["quantity"],
+                    unit_price=item["price"],
+                    line_total=item["price"] * item["quantity"],
+                )
+                for item in prepared.items
+            ],
+            goods_amount=prepared.goods_amount,
+            delivery_fee=prepared.delivery_fee,
+            total_price=prepared.total_price,
+        )
+
+    async def _prepare_order(
+        self,
+        order: OrderCreate,
+        user_id: str,
+        *,
+        current_time: datetime,
+        session,
+    ) -> _PreparedOrder:
+        requested_quantities = self._requested_quantities(order)
+        saved_address = await self.address_repository.find_by_id(
+            user_id=user_id,
+            address_id=order.address_id,
+            session=session,
+        )
+        if saved_address is None:
+            raise OrderAddressNotFoundError("Address not found")
+
+        shop = await self.shop_repository.find_by_shop_id(
+            order.shop_id,
+            session=session,
+        )
+        self._validate_shop(shop, current_time)
+        address_input = DeliveryAddressInput(
+            province=saved_address.province,
+            city=saved_address.city,
+            district=saved_address.district,
+            detail_address=saved_address.detail_address,
+            longitude=saved_address.longitude,
+            latitude=saved_address.latitude,
+        )
+        resolved_delivery_location = ResolvedDeliveryLocation(
+            longitude=saved_address.longitude,
+            latitude=saved_address.latitude,
+            formatted_address=saved_address.formatted_address,
+            province=saved_address.province,
+            city=saved_address.city,
+            district=saved_address.district,
+            adcode=saved_address.adcode,
+            location_source=saved_address.location_source,
+            verification_status=saved_address.verification_status,
+        )
+        location_snapshot = self.delivery_location_service.build_snapshot(
+            address=address_input,
+            resolved=resolved_delivery_location,
+            shop=shop,
+        )
+        delivery_snapshot = OrderDeliveryAddressSnapshot(
+            **location_snapshot.model_dump(),
+            address_id=saved_address.address_id,
+            receiver_name=saved_address.receiver_name,
+            receiver_phone=saved_address.receiver_phone,
+            address_version=saved_address.version,
+        )
+
+        products = await self.product_repository.find_by_shop_and_food_ids(
+            order.shop_id,
+            list(requested_quantities),
+            session=session,
+        )
+        products_by_id = {product.food_id: product for product in products}
+        self._validate_products(
+            requested_quantities=requested_quantities,
+            products_by_id=products_by_id,
+        )
+        items = []
+        for food_id, quantity in requested_quantities.items():
+            product = products_by_id[food_id]
+            items.append({
+                "food_id": product.food_id,
+                "food_name": product.food_name,
+                "quantity": quantity,
+                "price": product.price,
+            })
+        goods_amount = math.fsum(
+            item["price"] * item["quantity"] for item in items
+        )
+        if goods_amount < shop.minimum_order_amount:
+            raise MinimumOrderAmountError(
+                "Order amount does not meet the shop minimum"
+            )
+        delivery_fee = shop.delivery_fee
+        return _PreparedOrder(
+            requested_quantities=requested_quantities,
+            products_by_id=products_by_id,
+            shop=shop,
+            items=items,
+            delivery_snapshot=delivery_snapshot,
+            delivery_address_text=address_input.full_address(),
+            goods_amount=goods_amount,
+            delivery_fee=delivery_fee,
+            total_price=math.fsum([goods_amount, delivery_fee]),
+        )
+
+    @staticmethod
+    def _requested_quantities(order: OrderCreate) -> dict[str, int]:
+        quantities: dict[str, int] = {}
+        for item in order.items:
+            quantities[item.food_id] = quantities.get(item.food_id, 0) + item.quantity
+        return quantities
 
     @staticmethod
     def _build_idempotency_request_hash(

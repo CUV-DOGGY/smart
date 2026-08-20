@@ -64,7 +64,10 @@ def route_after_model(state: AgentState) -> Literal["validate_tool", "__end__"]:
     return "validate_tool" if isinstance(last, AIMessage) and last.tool_calls else END
 
 
-def validate_tool_node(state: AgentState) -> dict:
+async def validate_tool_node(
+    state: AgentState,
+    runtime: Runtime[AgentRuntimeContext],
+) -> dict:
     last = state.get("messages", [])[-1]
     if not isinstance(last, AIMessage) or not last.tool_calls:
         return {}
@@ -106,13 +109,47 @@ def validate_tool_node(state: AgentState) -> dict:
         "approval_decision": None,
     }
     if not missing and ServiceToolRegistry.is_write(name):
+        try:
+            confirmation = await runtime.context.tools.prepare_confirmation(
+                name,
+                normalized,
+                user_id=runtime.context.user_id,
+            )
+        except Exception:
+            logger.exception("Agent confirmation preview failed tool=%s", name)
+            confirmation = {
+                "ok": False,
+                "code": "CONFIRMATION_PREVIEW_FAILED",
+                "message": "暂时无法生成操作确认信息，请稍后重试",
+            }
+        if not confirmation.get("ok"):
+            return {
+                "messages": [
+                    *extra_messages,
+                    ToolMessage(
+                        content=json.dumps(
+                            confirmation,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        ),
+                        tool_call_id=active_call["id"],
+                    ),
+                ],
+                "active_tool": None,
+                "active_call": None,
+                "slots": {},
+                "missing_slots": [],
+                "pending_action": None,
+            }
         update["pending_action"] = {
             "action_id": str(uuid.uuid4()),
             "tool_call_id": active_call["id"],
             "name": name,
             "args": normalized,
-            "summary": ServiceToolRegistry.confirmation_summary(name, normalized),
+            "summary": confirmation["summary"],
         }
+        if confirmation.get("presentation"):
+            update["pending_action"]["presentation"] = confirmation["presentation"]
     else:
         update["pending_action"] = None
     return update
@@ -147,13 +184,14 @@ def clarification_node(state: AgentState) -> dict:
 
 def confirmation_node(state: AgentState) -> dict:
     action = state["pending_action"]
-    response = interrupt(
-        {
-            "interrupt_id": action["action_id"],
-            "action": action["name"],
-            "summary": action["summary"],
-        }
-    )
+    payload = {
+        "interrupt_id": action["action_id"],
+        "action": action["name"],
+        "summary": action["summary"],
+    }
+    if action.get("presentation"):
+        payload["presentation"] = action["presentation"]
+    response = interrupt(payload)
     decision = response.get("decision") if isinstance(response, dict) else None
     supplied_id = response.get("interrupt_id") if isinstance(response, dict) else None
     if supplied_id != action["action_id"] or decision not in {"approve", "reject"}:

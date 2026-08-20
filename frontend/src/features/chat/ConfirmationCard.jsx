@@ -1,5 +1,23 @@
+import { OrderConfirmationCard } from './OrderConfirmationCard.jsx';
+
+
+const confirmationPresenters = {
+  order: OrderConfirmationCard,
+};
+
+
 export function ConfirmationCard({ confirmation, disabled, onDecision }) {
   if (!confirmation) return null;
+  const Presentation = confirmationPresenters[confirmation.presentation?.kind];
+  if (Presentation) {
+    return (
+      <Presentation
+        confirmation={confirmation}
+        disabled={disabled}
+        onDecision={onDecision}
+      />
+    );
+  }
   return (
     <section className="confirmation-card" aria-label="待确认业务操作">
       <div>

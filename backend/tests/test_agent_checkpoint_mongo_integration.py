@@ -28,6 +28,9 @@ class FakeRegistry:
     def __init__(self):
         self.calls = []
 
+    async def prepare_confirmation(self, name, arguments, *, user_id):
+        return {"ok": True, "summary": f"确认执行 {name}"}
+
     async def execute(self, name, arguments, *, user_id, action_id):
         self.calls.append((name, arguments, user_id, action_id))
         return {"ok": True}

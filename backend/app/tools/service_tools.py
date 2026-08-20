@@ -150,6 +150,41 @@ class ServiceToolRegistry:
             return f"删除地址 {arguments['address_id']}"
         raise ToolValidationFailure("TOOL_DOES_NOT_REQUIRE_CONFIRMATION")
 
+    async def prepare_confirmation(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        user_id: str,
+    ) -> dict[str, Any]:
+        """Build a safe presentation DTO without executing a write operation."""
+
+        try:
+            if name == "create_order":
+                preview = await self.order_service.preview_order(
+                    OrderCreate.model_validate(arguments),
+                    user_id,
+                )
+                presentation = preview.model_dump(mode="json")
+                phone = presentation["receiver_phone"]
+                presentation["receiver_phone"] = (
+                    f"{phone[:3]}****{phone[-4:]}" if len(phone) == 11 else "***"
+                )
+                return {
+                    "ok": True,
+                    "summary": f"请确认来自 {preview.shop_name} 的订单",
+                    "presentation": presentation,
+                }
+            return {
+                "ok": True,
+                "summary": self.confirmation_summary(name, arguments),
+            }
+        except Exception as exc:
+            failure = self._business_failure(exc)
+            if failure is not None:
+                return failure
+            raise
+
     async def execute(
         self,
         name: str,
@@ -201,32 +236,32 @@ class ServiceToolRegistry:
             if name == "delete_address":
                 await self.address_service.delete_address(arguments["address_id"], user_id)
                 return {"ok": True, "address_id": arguments["address_id"]}
-        except (AddressNotFoundError, OrderAddressNotFoundError):
-            return {"ok": False, "code": "ADDRESS_NOT_FOUND", "message": "收货地址不存在"}
-        except OrderNotFoundError:
-            return {"ok": False, "code": "ORDER_NOT_FOUND", "message": "订单不存在或无权访问"}
-        except OrderStateConflictError:
-            return {"ok": False, "code": "ORDER_STATE_CONFLICT", "message": "当前订单状态不允许该操作"}
-        except ShopNotFoundError:
-            return {"ok": False, "code": "SHOP_NOT_FOUND", "message": "店铺不存在"}
-        except ProductNotFoundError:
-            return {"ok": False, "code": "PRODUCT_NOT_FOUND", "message": "部分商品不存在"}
-        except ShopUnavailableError:
-            return {"ok": False, "code": "SHOP_UNAVAILABLE", "message": "店铺当前不可接单"}
-        except ShopClosedError:
-            return {"ok": False, "code": "SHOP_CLOSED", "message": "店铺当前不在营业时间"}
-        except ProductUnavailableError:
-            return {"ok": False, "code": "PRODUCT_UNAVAILABLE", "message": "部分商品当前不可售"}
-        except InsufficientStockError:
-            return {"ok": False, "code": "INSUFFICIENT_STOCK", "message": "商品库存不足"}
-        except MinimumOrderAmountError:
-            return {"ok": False, "code": "MINIMUM_ORDER_AMOUNT", "message": "未达到最低起送金额"}
-        except InventoryReservationError:
-            return {"ok": False, "code": "INVENTORY_CHANGED", "message": "库存已变化，请重试"}
-        except IdempotencyKeyConflictError:
-            return {"ok": False, "code": "IDEMPOTENCY_KEY_CONFLICT", "message": "操作幂等键冲突"}
-        except ShopDeliveryConfigurationError:
-            return {"ok": False, "code": "SHOP_DELIVERY_CONFIG_NOT_CONFIGURED", "message": "店铺配送范围尚未配置"}
-        except OutsideDeliveryAreaError:
-            return {"ok": False, "code": "OUTSIDE_DELIVERY_AREA", "message": "收货地址超出配送范围"}
+        except Exception as exc:
+            failure = self._business_failure(exc)
+            if failure is not None:
+                return failure
+            raise
         raise ToolValidationFailure("UNKNOWN_TOOL")
+
+    @staticmethod
+    def _business_failure(exc: Exception) -> dict[str, Any] | None:
+        mappings = (
+            ((AddressNotFoundError, OrderAddressNotFoundError), "ADDRESS_NOT_FOUND", "收货地址不存在"),
+            ((OrderNotFoundError,), "ORDER_NOT_FOUND", "订单不存在或无权访问"),
+            ((OrderStateConflictError,), "ORDER_STATE_CONFLICT", "当前订单状态不允许该操作"),
+            ((ShopNotFoundError,), "SHOP_NOT_FOUND", "店铺不存在"),
+            ((ProductNotFoundError,), "PRODUCT_NOT_FOUND", "部分商品不存在"),
+            ((ShopUnavailableError,), "SHOP_UNAVAILABLE", "店铺当前不可接单"),
+            ((ShopClosedError,), "SHOP_CLOSED", "店铺当前不在营业时间"),
+            ((ProductUnavailableError,), "PRODUCT_UNAVAILABLE", "部分商品当前不可售"),
+            ((InsufficientStockError,), "INSUFFICIENT_STOCK", "商品库存不足"),
+            ((MinimumOrderAmountError,), "MINIMUM_ORDER_AMOUNT", "未达到最低起送金额"),
+            ((InventoryReservationError,), "INVENTORY_CHANGED", "库存已变化，请重试"),
+            ((IdempotencyKeyConflictError,), "IDEMPOTENCY_KEY_CONFLICT", "操作幂等键冲突"),
+            ((ShopDeliveryConfigurationError,), "SHOP_DELIVERY_CONFIG_NOT_CONFIGURED", "店铺配送范围尚未配置"),
+            ((OutsideDeliveryAreaError,), "OUTSIDE_DELIVERY_AREA", "收货地址超出配送范围"),
+        )
+        for error_types, code, message in mappings:
+            if isinstance(exc, error_types):
+                return {"ok": False, "code": code, "message": message}
+        return None

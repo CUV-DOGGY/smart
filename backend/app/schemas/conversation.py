@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.schemas.order import OrderConfirmationPreview
+
 
 class ChatStreamRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -24,6 +26,7 @@ class PendingConfirmation(BaseModel):
     interrupt_id: str
     action: str
     summary: str
+    presentation: OrderConfirmationPreview | None = None
 
 
 class ConversationSummary(BaseModel):

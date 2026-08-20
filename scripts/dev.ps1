@@ -17,6 +17,7 @@ $previousMongoUrl = [Environment]::GetEnvironmentVariable("MONGODB_URL", "Proces
 $previousRedisUrl = [Environment]::GetEnvironmentVariable("REDIS_URL", "Process")
 $previousApiUrl = [Environment]::GetEnvironmentVariable("VITE_API_BASE_URL", "Process")
 $backendProcess = $null
+$taskkillPath = Join-Path $env:SystemRoot "System32\taskkill.exe"
 
 if (-not (Test-Path -LiteralPath $pythonPath)) {
     throw "Virtual environment is missing. Run scripts/bootstrap.ps1 first."
@@ -45,6 +46,15 @@ if ($LASTEXITCODE -ne 0) { throw "Redis failed to start." }
 
 & $pythonPath -c "from pymongo import MongoClient; from redis import Redis; m=MongoClient('$localMongoUrl', serverSelectionTimeoutMS=2000); assert m.admin.command('ping')['ok'] == 1; assert Redis.from_url('$localRedisUrl', socket_connect_timeout=2).ping(); print('MongoDB and Redis are ready')"
 if ($LASTEXITCODE -ne 0) { throw "MongoDB or Redis readiness check failed." }
+
+$portOwners = @(
+    Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -Unique
+)
+if ($portOwners.Count -gt 0) {
+    $ownerText = $portOwners -join ", "
+    throw "Backend port $Port is already in use by PID(s): $ownerText. Stop the previous development process first."
+}
 
 New-Item -ItemType Directory -Force -Path $runtimeLogRoot | Out-Null
 $stdoutLog = Join-Path $runtimeLogRoot "backend.stdout.log"
@@ -92,8 +102,7 @@ try {
     }
 } finally {
     if ($backendProcess -and -not $backendProcess.HasExited) {
-        Stop-Process -Id $backendProcess.Id -Force
-        $backendProcess.WaitForExit()
+        & $taskkillPath /PID $backendProcess.Id /T /F *> $null
     }
     [Environment]::SetEnvironmentVariable("MONGODB_URL", $previousMongoUrl, "Process")
     [Environment]::SetEnvironmentVariable("REDIS_URL", $previousRedisUrl, "Process")

@@ -1,6 +1,6 @@
 import unittest
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
@@ -26,6 +26,12 @@ class FakeRegistry:
     async def execute(self, name, arguments, *, user_id, action_id):
         self.calls.append((name, arguments, user_id, action_id))
         return {"ok": True, "result": "done"}
+
+
+class FailingRegistry(FakeRegistry):
+    async def execute(self, name, arguments, *, user_id, action_id):
+        self.calls.append((name, arguments, user_id, action_id))
+        raise RuntimeError("database document validation failed")
 
 
 def tool_call(name, args, call_id="call-1"):
@@ -109,6 +115,37 @@ class AgentGraphTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(registry.calls, [])
         self.assertEqual(result["messages"][-1].content, "已取消，本次操作没有执行。")
+
+    async def test_tool_failure_is_returned_as_a_paired_tool_message(self):
+        checkpointer = InMemorySaver()
+        graph = build_service_agent(checkpointer)
+        registry = FailingRegistry()
+        model = FakeModel(
+            [
+                tool_call("list_products", {"shop_id": "shop-001"}),
+                AIMessage(content="商品服务暂时不可用，请稍后重试。"),
+            ]
+        )
+        context = AgentRuntimeContext("user-001", model, registry)
+        config = {"configurable": {"thread_id": "user-001:tool-failure"}}
+
+        result = await graph.ainvoke(
+            {"messages": [HumanMessage(content="查一下商品")]},
+            config=config,
+            context=context,
+        )
+
+        tool_result = next(
+            message
+            for message in result["messages"]
+            if isinstance(message, ToolMessage)
+        )
+        self.assertEqual(tool_result.tool_call_id, "call-1")
+        self.assertIn("TOOL_EXECUTION_FAILED", tool_result.content)
+        self.assertEqual(
+            result["messages"][-1].content,
+            "商品服务暂时不可用，请稍后重试。",
+        )
 
 
 if __name__ == "__main__":

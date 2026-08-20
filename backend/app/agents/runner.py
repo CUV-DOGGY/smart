@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    ToolMessage,
+)
 from langgraph.types import Command
 
 from app.agents.runtime import AgentRuntimeContext
+
+
+logger = logging.getLogger(__name__)
 
 
 class AgentConfirmationRequiredError(RuntimeError):
@@ -56,7 +65,17 @@ class AgentRunner:
             raise AgentConfirmationRequiredError
         config = self.config(user_id, conversation_id)
         snapshot = await self.graph.aget_state(config)
-        if getattr(snapshot, "values", None):
+        snapshot_values = getattr(snapshot, "values", None)
+        if snapshot_values and self._has_unanswered_tool_calls(
+            snapshot_values.get("messages", [])
+        ):
+            logger.warning(
+                "Resetting invalid agent checkpoint conversation_id=%s",
+                conversation_id,
+            )
+            await self.delete_thread(user_id, conversation_id)
+            snapshot_values = None
+        if snapshot_values:
             input_messages = [HumanMessage(content=message)]
         else:
             input_messages = [
@@ -164,6 +183,27 @@ class AgentRunner:
                 if isinstance(item, dict) and isinstance(item.get("text"), str)
             )
         return ""
+
+    @staticmethod
+    def _has_unanswered_tool_calls(messages: list[Any]) -> bool:
+        for index, message in enumerate(messages):
+            if not isinstance(message, AIMessage) or not message.tool_calls:
+                continue
+            unanswered = {
+                call.get("id")
+                for call in message.tool_calls
+                if isinstance(call, dict) and call.get("id")
+            }
+            following_index = index + 1
+            while (
+                following_index < len(messages)
+                and isinstance(messages[following_index], ToolMessage)
+            ):
+                unanswered.discard(messages[following_index].tool_call_id)
+                following_index += 1
+            if unanswered:
+                return True
+        return False
 
     async def delete_thread(self, user_id: str, conversation_id: str) -> None:
         await self.checkpointer.adelete_thread(self.thread_id(user_id, conversation_id))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Literal
 
@@ -13,6 +14,9 @@ from app.agents.runtime import AgentRuntimeContext
 from app.agents.state import AgentState
 from app.prompts.service_agent import prompt_with_task
 from app.tools.service_tools import ServiceToolRegistry, ToolValidationFailure
+
+
+logger = logging.getLogger(__name__)
 
 
 CANCEL_PHRASES = {"算了", "不用了", "取消", "取消操作", "不操作了"}
@@ -194,12 +198,20 @@ async def execute_tool_node(
             "pending_action": None,
         }
     action_id = action["action_id"] if action else str(uuid.uuid4())
-    result = await runtime.context.tools.execute(
-        call["name"],
-        call["args"],
-        user_id=runtime.context.user_id,
-        action_id=action_id,
-    )
+    try:
+        result = await runtime.context.tools.execute(
+            call["name"],
+            call["args"],
+            user_id=runtime.context.user_id,
+            action_id=action_id,
+        )
+    except Exception:
+        logger.exception("Agent tool execution failed tool=%s", call["name"])
+        result = {
+            "ok": False,
+            "code": "TOOL_EXECUTION_FAILED",
+            "message": "业务服务暂时不可用，请稍后重试",
+        }
     return {
         "messages": [
             ToolMessage(

@@ -10,9 +10,15 @@ from app.config import settings
 from app.core.client_ip import get_client_ip
 from app.core.security import PasswordHashCapacityError
 from app.dependencies.cache import get_redis
+from app.dependencies.auth import get_current_user
 from app.dependencies.database import get_db
 from app.repositories.auth_repository import AuthRepository
-from app.schemas.auth import RegisterRequest, RegisterResponse, TokenResponse
+from app.schemas.auth import (
+    AuthenticatedUser,
+    RegisterRequest,
+    RegisterResponse,
+    TokenResponse,
+)
 from app.services.auth_service import (
     AuthenticationError,
     AuthService,
@@ -27,6 +33,13 @@ from app.services.auth_rate_limiter import (
 
 router = APIRouter(prefix="/auth", tags=["用户认证"])
 logger = logging.getLogger(__name__)
+
+
+@router.get("/me", response_model=AuthenticatedUser)
+async def me(
+    current_user: Annotated[AuthenticatedUser, Depends(get_current_user)],
+) -> AuthenticatedUser:
+    return current_user
 
 
 def get_auth_repository(db=Depends(get_db)) -> AuthRepository:

@@ -4,15 +4,14 @@ from app.core import (
     setup_exception_handlers,
     setup_middleware,
 )
-from app.schemas.chat import ChatRequest, ChatResponse
-from app.dependencies.auth import get_current_user_id
 from app.routers.address_router import router as address_router
 from app.routers.auth_router import router as auth_router
+from app.routers.catalog_router import router as catalog_router
+from app.routers.chat_router import chat_router, conversation_router
 from app.routers.health_router import router as health_router
 from app.routers.order_router import router as order_router
 import logging
-from typing import Annotated
-from fastapi import Depends, FastAPI
+from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +29,6 @@ app.include_router(auth_router)
 app.include_router(address_router)
 app.include_router(order_router)
 app.include_router(health_router)
-
-
-# ==================== Routes ====================
-@app.post("/chat", response_model=ChatResponse, tags=["外卖智能客服"])
-async def chat(
-    request: ChatRequest,
-    user_id: Annotated[str, Depends(get_current_user_id)],
-):
-    """智能客服聊天接口"""
-    pass
+app.include_router(catalog_router)
+app.include_router(chat_router)
+app.include_router(conversation_router)

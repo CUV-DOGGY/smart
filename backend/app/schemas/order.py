@@ -102,3 +102,22 @@ class OrderCancelResponse(BaseModel):
     status: str
     message: str
     order_status: OrderStatus | None = None
+
+
+class OrderCreateResult(BaseModel):
+    order_id: str
+    order_status: OrderStatus
+    goods_amount: float = Field(ge=0, allow_inf_nan=False)
+    delivery_fee: float = Field(ge=0, allow_inf_nan=False)
+    total_price: float = Field(ge=0, allow_inf_nan=False)
+    delivery_distance_meters: int = Field(ge=0)
+
+
+class OrderHistoryPage(BaseModel):
+    items: List[OrderHistoryItem]
+    next_cursor: str | None = None
+
+
+class OrderCancelResult(BaseModel):
+    order_id: str
+    order_status: OrderStatus

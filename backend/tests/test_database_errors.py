@@ -9,6 +9,7 @@ from app.core.database_errors import DatabaseUnavailableError
 from app.core.exception_handlers import setup_exception_handlers
 from app.repositories.address_repository import AddressRepository
 from app.repositories.order_repository import OrderRepository
+from app.repositories.product_repository import ProductRepository
 
 
 class AddressRepositoryDatabaseErrorTests(unittest.IsolatedAsyncioTestCase):
@@ -81,6 +82,48 @@ class OrderRepositoryDatabaseErrorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(raised.exception.__cause__, mongo_error)
 
 
+class ProductRepositoryDatabaseErrorTests(unittest.IsolatedAsyncioTestCase):
+    def make_repository(self):
+        collection = MagicMock()
+        db = MagicMock()
+        db.__getitem__.return_value = collection
+        return ProductRepository(db), collection
+
+    async def test_product_lookup_preserves_mongo_failure_as_cause(self):
+        repository, collection = self.make_repository()
+        mongo_error = ServerSelectionTimeoutError("server unavailable")
+        cursor = MagicMock()
+        cursor.to_list = AsyncMock(side_effect=mongo_error)
+        collection.find.return_value = cursor
+
+        with self.assertRaises(DatabaseUnavailableError) as raised:
+            await repository.find_by_shop_and_food_ids(
+                shop_id="shop-001",
+                food_ids=["food-001"],
+            )
+
+        self.assertIs(raised.exception.__cause__, mongo_error)
+
+    async def test_stock_reservation_preserves_mongo_failure_as_cause(self):
+        repository, collection = self.make_repository()
+        mongo_error = ServerSelectionTimeoutError("server unavailable")
+        collection.update_one = AsyncMock(side_effect=mongo_error)
+        product = MagicMock(
+            food_id="food-001",
+            shop_id="shop-001",
+            price=100,
+        )
+
+        with self.assertRaises(DatabaseUnavailableError) as raised:
+            await repository.reserve_stock(
+                product=product,
+                quantity=1,
+                session=MagicMock(),
+            )
+
+        self.assertIs(raised.exception.__cause__, mongo_error)
+
+
 class DatabaseUnavailableHandlerTests(unittest.TestCase):
     def make_app(self, exception):
         app = FastAPI()
@@ -103,15 +146,11 @@ class DatabaseUnavailableHandlerTests(unittest.TestCase):
             response = TestClient(app).get("/database-dependent")
 
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(
-            response.json(),
-            {
-                "detail": {
-                    "code": "DATABASE_UNAVAILABLE",
-                    "message": "数据库暂时不可用，请稍后重试",
-                }
-            },
-        )
+        body = response.json()
+        self.assertEqual(body["code"], "DATABASE_UNAVAILABLE")
+        self.assertEqual(body["message"], "数据库暂时不可用，请稍后重试")
+        self.assertEqual(body["field_errors"], [])
+        self.assertTrue(body["request_id"])
         self.assertEqual(response.headers["Retry-After"], "1")
         log_exception.assert_called_once()
 
@@ -127,7 +166,7 @@ class DatabaseUnavailableHandlerTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(
-            response.json()["detail"]["code"],
+            response.json()["code"],
             "DATABASE_UNAVAILABLE",
         )
         log_exception.assert_called_once()

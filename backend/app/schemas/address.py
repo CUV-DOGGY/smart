@@ -103,3 +103,7 @@ class UserAddressListResponse(BaseModel):
 class UserAddressActionResponse(BaseModel):
     status: str
     message: str
+
+
+class UserAddressPage(BaseModel):
+    items: list[UserAddressData]

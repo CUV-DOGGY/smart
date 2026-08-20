@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
 
 from app.dependencies.auth import get_current_user_id
 from app.dependencies.database import get_db
@@ -12,7 +12,9 @@ from app.repositories.address_repository import AddressRepository
 from app.schemas.address import (
     UserAddressActionResponse,
     UserAddressCreate,
+    UserAddressData,
     UserAddressListResponse,
+    UserAddressPage,
     UserAddressResponse,
     UserAddressUpdate,
 )
@@ -110,7 +112,7 @@ async def _check_geocoding_rate_limit(
 
 @router.post(
     "",
-    response_model=UserAddressResponse,
+    response_model=UserAddressData,
     status_code=status.HTTP_201_CREATED,
 )
 async def create_address(
@@ -123,7 +125,7 @@ async def create_address(
 ):
     await _check_geocoding_rate_limit(limiter, user_id)
     try:
-        return await service.create_address(request, user_id)
+        return (await service.create_address(request, user_id)).address
     except (
         AddressLimitExceededError,
         AddressNeedsMapPickError,
@@ -132,27 +134,28 @@ async def create_address(
         _raise_address_error(exc)
 
 
-@router.get("", response_model=UserAddressListResponse)
+@router.get("", response_model=UserAddressPage)
 async def list_addresses(
     user_id: Annotated[str, Depends(get_current_user_id)],
     service: AddressService = Depends(get_address_service),
 ):
-    return await service.list_addresses(user_id)
+    response = await service.list_addresses(user_id)
+    return UserAddressPage(items=response.addresses)
 
 
-@router.get("/{address_id}", response_model=UserAddressResponse)
+@router.get("/{address_id}", response_model=UserAddressData)
 async def get_address(
     address_id: AddressId,
     user_id: Annotated[str, Depends(get_current_user_id)],
     service: AddressService = Depends(get_address_service),
 ):
     try:
-        return await service.get_address(address_id, user_id)
+        return (await service.get_address(address_id, user_id)).address
     except AddressNotFoundError as exc:
         _raise_address_error(exc)
 
 
-@router.put("/{address_id}", response_model=UserAddressResponse)
+@router.put("/{address_id}", response_model=UserAddressData)
 async def update_address(
     address_id: AddressId,
     request: UserAddressUpdate,
@@ -164,11 +167,12 @@ async def update_address(
 ):
     await _check_geocoding_rate_limit(limiter, user_id)
     try:
-        return await service.update_address(
+        response = await service.update_address(
             address_id,
             request,
             user_id,
         )
+        return response.address
     except (
         AddressNotFoundError,
         AddressNeedsMapPickError,
@@ -179,7 +183,7 @@ async def update_address(
 
 @router.post(
     "/{address_id}/set-default",
-    response_model=UserAddressResponse,
+    response_model=UserAddressData,
 )
 async def set_default_address(
     address_id: AddressId,
@@ -187,14 +191,14 @@ async def set_default_address(
     service: AddressService = Depends(get_address_service),
 ):
     try:
-        return await service.set_default(address_id, user_id)
+        return (await service.set_default(address_id, user_id)).address
     except AddressNotFoundError as exc:
         _raise_address_error(exc)
 
 
 @router.delete(
     "/{address_id}",
-    response_model=UserAddressActionResponse,
+    status_code=status.HTTP_204_NO_CONTENT,
 )
 async def delete_address(
     address_id: AddressId,
@@ -202,6 +206,7 @@ async def delete_address(
     service: AddressService = Depends(get_address_service),
 ):
     try:
-        return await service.delete_address(address_id, user_id)
+        await service.delete_address(address_id, user_id)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
     except AddressNotFoundError as exc:
         _raise_address_error(exc)

@@ -1,179 +1,206 @@
 # SmartServe AI
 
-SmartServe AI 是正在融合中的外卖交易履约智能客服平台。本仓库是三个原型项目的融合主仓库；第一阶段已经建立可复现的后端工程基线，后续阶段将接入聊天前端、LangGraph Agent 和 MCP 适配层。
+SmartServe AI 是面向外卖交易履约场景的全栈智能客服项目。当前第二阶段已经打通真实登录态、流式 AI 会话、地址与地图、商品目录、订单创建/查询/取消，并以主仓库的 Service 层作为唯一业务入口。
 
-当前后端包含用户认证、Redis 限流、地址与高德地理编码、配送范围校验、订单创建与取消、库存预占、幂等控制和统一异常处理。`/chat` 仍是下一阶段待实现能力。
+## 能力概览
 
-## 技术栈
+- OAuth2 密码登录、JWT 身份恢复、Redis 认证限流
+- DeepSeek 兼容模型 SSE 流式回答、MongoDB 会话与消息历史
+- 收货地址 CRUD、默认地址、高德地图选点、服务端二次地理校验
+- 店铺/商品只读目录、服务端定价、库存事务预占、配送半径校验
+- 幂等下单、订单历史/详情/取消和用户数据隔离
+- 统一 API 错误体、请求 ID、基础设施健康检查
 
-- Python 3.14.5、uv
-- FastAPI、Pydantic、Uvicorn
-- MongoDB 8.3 单节点副本集
-- Redis 8.2（Docker Desktop）
-- LangChain OpenAI / DeepSeek 兼容接口
-- 高德地图 Web 服务
-- unittest
+Agent、RAG、业务工具调用和 MCP 属于后续阶段；当前聊天模型不会声称已经执行订单或地址操作。
 
-## 本地架构
+## 分层架构
 
 ```text
-Windows
-├─ E:\python312\python.exe        Python 3.14.5
-├─ MongoDB Windows Service        localhost:27017 / rs0
-├─ Docker Desktop
-│  └─ smartserve-redis            127.0.0.1:6380
-└─ FastAPI                        127.0.0.1:8000
+frontend/src
+├─ app/                  路由、Store 与应用装配
+├─ shared/               HTTP、环境、存储和通用布局
+└─ features/
+   ├─ auth/              登录态与认证页面
+   ├─ chat/              会话、SSE 与消息组件
+   ├─ address/           地址页面和表单
+   ├─ map/               高德 SDK 适配器与地图组件
+   └─ order/             目录、下单和订单页面
+
+backend/app
+├─ routers/              HTTP 与鉴权边界
+├─ services/             业务规则和用例编排
+├─ repositories/         MongoDB 持久化边界
+├─ schemas/              公共请求与响应模型
+└─ core/                 生命周期、中间件、错误和安全
 ```
 
-MongoDB 使用原生 Windows 服务；Redis 使用容器；FastAPI 使用本仓库的 uv 虚拟环境运行。
+业务域不直接访问其他域的内部状态。前端页面只使用本域 API；地址域只接收地图适配器产生的标准位置对象，不依赖高德 SDK 类型。后端 Router 不直接拼 MongoDB 查询，Service 不读取 HTTP 请求。
 
-## 环境要求
+## 技术与版本
 
-- `E:\python312\python.exe`，版本必须为 3.14.5
-- [uv](https://docs.astral.sh/uv/)
-- MongoDB 8.3，已启用副本集 `rs0`
-- [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)
-- 可用的 DeepSeek 兼容模型配置和高德 Web 服务 Key
-
-确认 Python：
-
-```powershell
-& "E:\python312\python.exe" --version
-```
-
-确认 MongoDB：
-
-```powershell
-& "E:\python312\python.exe" -c "from pymongo import MongoClient; c=MongoClient('mongodb://localhost:27017/?replicaSet=rs0'); s=c.admin.command('replSetGetStatus'); print(s['set'], s['members'][0]['stateStr'])"
-```
-
-预期输出包含 `rs0 PRIMARY`。MongoDB 配置至少需要：
-
-```yaml
-net:
-  port: 27017
-  bindIp: 127.0.0.1
-replication:
-  replSetName: rs0
-```
+- Python 3.14.5：`E:\python312\python.exe`
+- Node.js 24.15.0、npm 11
+- FastAPI、Motor、Redis、LangChain OpenAI
+- React 19、Redux Toolkit、React Router、Vite
+- MongoDB 8.3 单节点副本集 `rs0`
+- Redis 8.2 Alpine，Docker Desktop
+- 高德 Web 服务与地图 JSAPI 2.0
 
 ## 首次安装
 
-在仓库根目录运行：
+确认 MongoDB Windows 服务为 `rs0 PRIMARY`，Docker Desktop 已启动，然后运行：
 
 ```powershell
 .\scripts\bootstrap.ps1
 ```
 
-脚本会验证 Python 3.14.5，并根据 `backend/uv.lock` 创建 `backend/.venv`。如果 `backend/.env` 不存在，脚本只会从 `.env.example` 创建一次，不会覆盖已有配置。
+脚本会：
 
-依赖变更统一使用 uv，并同时提交 `pyproject.toml` 与 `uv.lock`：
+1. 校验 Python 3.14.5 与 Node.js 24.15.0。
+2. 使用 `backend/uv.lock` 重建后端环境。
+3. 使用 `frontend/package-lock.json` 执行 `npm ci`。
+4. 仅在缺少时创建 `backend/.env` 和 `frontend/.env.local`，不会覆盖本地配置。
+
+依赖变更必须同步锁文件：
 
 ```powershell
 uv add --project backend package-name
-uv remove --project backend package-name
-uv sync --project backend --locked --python E:\python312\python.exe
+Set-Location frontend
+npm install package-name
 ```
 
-## 环境变量
+## 配置
 
-编辑被 Git 忽略的 `backend/.env`，不要把真实密钥提交到仓库。主要配置：
+后端真实配置放在被忽略的 `backend/.env`：
 
 ```dotenv
 MODEL_NAME=your-model-name
 DEEPSEEK_API_KEY=replace-with-your-api-key
 DEEPSEEK_BASE_URL=https://api.example.com
-
 MONGODB_URL=mongodb://localhost:27017/?replicaSet=rs0
 MONGODB_DB_NAME=smart_customer_service
 REDIS_URL=redis://127.0.0.1:6380/0
-
 AMAP_WEB_SERVICE_KEY=replace-with-your-amap-web-service-key
 JWT_SECRET_KEY=replace-with-at-least-32-random-characters
 RATE_LIMIT_KEY_SECRET=replace-with-a-different-32-character-secret
 ```
 
-完整字段和安全说明见 `backend/.env.example`。
+前端本地配置放在 `frontend/.env.local`：
 
-## 启动开发环境
+```dotenv
+VITE_API_BASE_URL=http://127.0.0.1:8000
+VITE_AMAP_JS_KEY=replace-with-your-amap-jsapi-key
+VITE_AMAP_SECURITY_JS_CODE=replace-with-your-amap-security-js-code
+```
 
-先确保 MongoDB Windows 服务和 Docker Desktop 已启动，然后运行：
+`AMAP_WEB_SERVICE_KEY` 与 Web 端 JSAPI Key 是不同平台类型。`VITE_*` 会进入浏览器包，静态安全密钥只适用于本地演示；生产环境应切换到高德安全代理方式。任何真实密钥都不能提交。
+
+## 店铺和商品数据
+
+应用不会自动创建业务演示数据。请在 MongoDB 中手工写入：
+
+- `shops`：店铺状态、营业时间、起送金额、配送费、位置和配送半径。
+- `products`：商品名、价格、库存与上下架状态。
+
+完整字段和可直接改写的 `mongosh` 示例见 [MongoDB 店铺与商品数据契约](docs/mongodb-catalog.md)。订单页在集合为空时会显示准备说明。
+
+## 启动
 
 ```powershell
 .\scripts\dev.ps1
 ```
 
-脚本会启动 Redis、检查 MongoDB 和 Redis，再以前台热重载模式启动 FastAPI。常用地址：
+脚本会启动/检查 Redis，确认 MongoDB，后台运行 Uvicorn，然后以前台方式运行 Vite。退出 Vite 后只清理由该脚本创建的后端进程。
 
+- 前端：`http://127.0.0.1:5173`
 - Swagger：`http://127.0.0.1:8000/docs`
-- 存活检查：`http://127.0.0.1:8000/health/live`
-- 就绪检查：`http://127.0.0.1:8000/health/ready`
+- 存活：`http://127.0.0.1:8000/health/live`
+- 就绪：`http://127.0.0.1:8000/health/ready`
+- 后端运行日志：`.runtime-logs/`
 
-只管理 Redis：
+Redis 容器为 `smartserve-redis`，只绑定 `127.0.0.1:6380`；6379 保留给已有项目。AOF 数据存放在命名卷 `smartserve_redis_data`。
 
-```powershell
-$docker = (Get-Command docker -ErrorAction SilentlyContinue).Source
-if (-not $docker) { $docker = Join-Path $env:LOCALAPPDATA "Programs\DockerDesktop\resources\bin\docker.exe" }
-& $docker compose -f infra\compose.dev.yml up -d --wait redis
-& $docker compose -f infra\compose.dev.yml ps
-& $docker compose -f infra\compose.dev.yml stop redis
+## 公共 API
+
+### 认证
+
+- `POST /auth/register`
+- `POST /auth/login`
+- `GET /auth/me`
+
+### 智能客服
+
+- `POST /chat/stream`
+- `GET /conversations`
+- `GET /conversations/{conversation_id}/messages`
+- `DELETE /conversations/{conversation_id}`
+
+流事件依次为 `meta`、若干 `token`、`done`；模型失败时为 `error`。客户端不提交 UID，所有权只由 Bearer Token 决定。
+
+### 地址、目录与订单
+
+- `GET|POST /addresses`
+- `GET|PUT|DELETE /addresses/{address_id}`
+- `POST /addresses/{address_id}/set-default`
+- `GET /catalog/shops`
+- `GET /catalog/shops/{shop_id}/products`
+- `GET|POST /orders`
+- `GET /orders/{order_id}`
+- `POST /orders/{order_id}/cancel`
+
+下单必须携带 `Idempotency-Key`。价格、库存、店铺状态、地址归属和配送范围均由服务端重新确认。
+
+## 错误协议
+
+所有普通 HTTP 错误使用统一结构，响应头同时提供 `X-Request-ID`：
+
+```json
+{
+  "code": "ADDRESS_NOT_FOUND",
+  "message": "收货地址不存在",
+  "field_errors": [],
+  "request_id": "a-request-id"
+}
 ```
 
-Redis 仅绑定本机回环地址的 6380 端口，并使用命名卷 `smartserve_redis_data` 保存 AOF 数据。6379 保留给当前已存在的其他项目 Redis 容器。
-
-## 健康检查
-
-- `GET /health/live` 只检查 FastAPI 进程，正常返回 `{"status":"ok"}`。
-- `GET /health/ready` 并行检查 MongoDB 与 Redis。全部正常返回 HTTP 200；任何组件不可用返回 HTTP 503。
-- 就绪响应只暴露 `ok` 或 `unavailable`，不会返回连接字符串和底层异常。
-- DeepSeek 和高德属于按请求调用的外部依赖，不纳入启动就绪检查。
+SSE 已开始后的模型错误使用同样的 `code/message/request_id` 字段发送 `error` 事件，不向浏览器返回连接串、密钥或异常栈。
 
 ## 测试
 
-运行全部单元测试：
+运行后端单元测试、前端 ESLint、Vitest 和生产构建：
 
 ```powershell
 .\scripts\test.ps1
 ```
 
-额外运行真实 MongoDB 集成测试：
+额外运行真实 MongoDB 事务和会话集成测试：
 
 ```powershell
 .\scripts\test.ps1 -Integration
 ```
 
-集成测试只允许使用以 `_test` 结尾的数据库名，并在结束时删除自己创建的测试订单。测试配置使用独立占位值，不依赖开发者的真实 `.env`。
+集成测试只使用以 `_test` 结尾的数据库，并清理自身创建的订单、会话与消息。LLM 单元测试使用假模型，不消耗真实 API 额度。
 
 ## 常见问题
 
-### Docker 命令不存在
+### 地图提示未配置
 
-安装并启动 Docker Desktop，重新打开 PowerShell。开发脚本也会自动识别 `%LOCALAPPDATA%\Programs\DockerDesktop` 下的 per-user 安装。
+确认 `frontend/.env.local` 同时填写 Web 端 JSAPI Key 和对应安全密钥，修改后重启 Vite。后端 Web 服务 Key 不能代替 JSAPI Key。
 
-### Redis 启动失败
+### 下单页没有店铺
 
-确认 6380 端口未被占用：
-
-```powershell
-Get-NetTCPConnection -LocalPort 6380 -ErrorAction SilentlyContinue
-& "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe" compose -f infra\compose.dev.yml logs redis
-```
+按 `docs/mongodb-catalog.md` 写入 `shops/products`，并确保店铺为启用、接单和当前营业状态。
 
 ### MongoDB 事务失败
 
-确认连接串包含 `replicaSet=rs0`，并确认 `replSetGetStatus` 显示 PRIMARY。standalone MongoDB 不能运行项目中的多文档事务。
+连接串必须包含 `replicaSet=rs0`，`replSetGetStatus` 必须显示 PRIMARY。standalone MongoDB 不支持本项目的库存与订单事务。
 
-### PowerShell 不允许运行脚本
+### Docker 命令不存在
 
-不需要永久修改系统策略，可以仅为单次进程执行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\bootstrap.ps1
-```
+脚本会自动识别 `%LOCALAPPDATA%\Programs\DockerDesktop\resources\bin\docker.exe`。若仍失败，请先启动 Docker Desktop。
 
 ## 后续融合路线
 
-1. 接入客服助手的 React 会话界面和真实登录态。
-2. 以升级版 Service 为唯一业务入口，实现 LangGraph 工具调用和真实 SSE。
-3. 迁移地图 Demo 的严格校验测试与 MCP Schema，不复制业务层。
-4. 增加知识库 RAG、Agent 评测集、链路追踪和面试演示流程。
+1. 将现有 Service 注册为 LangGraph 工具，客服通过工具而不是直接访问 Repository。
+2. 迁移地图 Demo 的 MCP Schema 与严格校验测试，不复制业务实现。
+3. 增加知识库 RAG、Agent 评测集、链路追踪、成本与延迟指标。

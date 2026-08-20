@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $uvCache = Join-Path $repoRoot "backend\.uv-cache"
+$frontendRoot = Join-Path $repoRoot "frontend"
 $integrationEnvironmentNames = @(
     "RUN_MONGO_INTEGRATION",
     "TEST_MONGODB_URL",
@@ -30,10 +31,22 @@ try {
         $env:RUN_MONGO_INTEGRATION = "1"
         $env:TEST_MONGODB_URL = "mongodb://localhost:27017/?replicaSet=rs0"
         $env:TEST_MONGODB_DB_NAME = "smart_customer_service_integration_test"
-        & uv run --project backend --locked --cache-dir $uvCache python -m unittest discover -s backend\tests -t backend -p test_order_repository_mongo_integration.py -v
+        & uv run --project backend --locked --cache-dir $uvCache python -m unittest discover -s backend\tests -t backend -p "test_*_mongo_integration.py" -v
         if ($LASTEXITCODE -ne 0) {
             throw "MongoDB integration tests failed."
         }
+    }
+
+    Push-Location $frontendRoot
+    try {
+        & npm run lint
+        if ($LASTEXITCODE -ne 0) { throw "Frontend lint failed." }
+        & npm test
+        if ($LASTEXITCODE -ne 0) { throw "Frontend tests failed." }
+        & npm run build
+        if ($LASTEXITCODE -ne 0) { throw "Frontend build failed." }
+    } finally {
+        Pop-Location
     }
 } finally {
     foreach ($name in $integrationEnvironmentNames) {

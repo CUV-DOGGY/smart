@@ -7,7 +7,45 @@ from pymongo.errors import ServerSelectionTimeoutError
 
 from app.core.database_errors import DatabaseUnavailableError
 from app.core.exception_handlers import setup_exception_handlers
+from app.repositories.address_repository import AddressRepository
 from app.repositories.order_repository import OrderRepository
+
+
+class AddressRepositoryDatabaseErrorTests(unittest.IsolatedAsyncioTestCase):
+    def make_repository(self):
+        address_collection = MagicMock()
+        user_collection = MagicMock()
+        db = MagicMock()
+        db.__getitem__.side_effect = lambda name: {
+            "user_addresses": address_collection,
+            "users": user_collection,
+        }[name]
+        return AddressRepository(db), address_collection
+
+    async def test_address_lookup_preserves_mongo_failure_as_cause(self):
+        repository, collection = self.make_repository()
+        mongo_error = ServerSelectionTimeoutError("server unavailable")
+        collection.find_one = AsyncMock(side_effect=mongo_error)
+
+        with self.assertRaises(DatabaseUnavailableError) as raised:
+            await repository.find_by_id(
+                user_id="user-001",
+                address_id="address-001",
+            )
+
+        self.assertIs(raised.exception.__cause__, mongo_error)
+
+    async def test_transaction_preserves_mongo_failure_as_cause(self):
+        repository, collection = self.make_repository()
+        mongo_error = ServerSelectionTimeoutError("server unavailable")
+        collection.database.client.start_session = AsyncMock(
+            side_effect=mongo_error
+        )
+
+        with self.assertRaises(DatabaseUnavailableError) as raised:
+            await repository.run_in_transaction(AsyncMock())
+
+        self.assertIs(raised.exception.__cause__, mongo_error)
 
 
 class OrderRepositoryDatabaseErrorTests(unittest.IsolatedAsyncioTestCase):

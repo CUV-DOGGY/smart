@@ -10,6 +10,10 @@ from pymongo import ReturnDocument
 
 from app.schemas.address import UserAddress
 
+from app.core.database_errors import (
+    DatabaseUnavailableError,
+    MONGO_UNAVAILABLE_EXCEPTIONS,
+)
 
 _T = TypeVar("_T")
 
@@ -72,8 +76,13 @@ class AddressRepository:
         callback: Callable[[AsyncIOMotorClientSession], Awaitable[_T]],
     ) -> _T:
         client = self.address_collection.database.client
-        async with await client.start_session() as session:
-            return await session.with_transaction(callback)
+        try:
+            async with await client.start_session() as session:
+                return await session.with_transaction(callback)
+        except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
+            raise DatabaseUnavailableError(
+                "MongoDB transaction is temporarily unavailable"
+            ) from exc
 
     async def acquire_user_address_lock(
         self,
@@ -121,34 +130,42 @@ class AddressRepository:
         address_id: str,
         session: AsyncIOMotorClientSession | None = None,
     ) -> UserAddress | None:
-        document = await self.address_collection.find_one(
-            {
-                "address_id": address_id,
-                "user_id": user_id,
-                "is_deleted": False,
-            },
-            ADDRESS_PROJECTION,
-            session=session,
-        )
-        if document is None:
-            return None
-        return UserAddress.model_validate(document)
+        try:
+            document = await self.address_collection.find_one(
+                {
+                    "address_id": address_id,
+                    "user_id": user_id,
+                    "is_deleted": False,
+                },
+                ADDRESS_PROJECTION,
+                session=session,
+            )
+            if document is None:
+                return None
+            return UserAddress.model_validate(document)
+        except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
+            raise DatabaseUnavailableError(
+                "MongoDB address lookup is temporarily unavailable"
+            ) from exc
 
     async def list_active(self, user_id: str) -> list[UserAddress]:
-        documents = await self.address_collection.find(
-            {
-                "user_id": user_id,
-                "is_deleted": False,
-            },
-            ADDRESS_PROJECTION,
-        ).sort([
-            ("is_default", -1),
-            ("update_time", -1),
-        ]).to_list(length=15)
-        return [
-            UserAddress.model_validate(document)
-            for document in documents
-        ]
+        documents = (
+            await self.address_collection.find(
+                {
+                    "user_id": user_id,
+                    "is_deleted": False,
+                },
+                ADDRESS_PROJECTION,
+            )
+            .sort(
+                [
+                    ("is_default", -1),
+                    ("update_time", -1),
+                ]
+            )
+            .to_list(length=15)
+        )
+        return [UserAddress.model_validate(document) for document in documents]
 
     async def update_address(
         self,

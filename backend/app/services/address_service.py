@@ -15,7 +15,6 @@ from app.schemas.address import (
 from app.schemas.delivery import ResolvedDeliveryLocation
 from app.services.delivery_location_service import DeliveryLocationService
 
-
 MAXIMUM_ADDRESSES_PER_USER = 15
 
 
@@ -36,9 +35,7 @@ class AddressService:
     ) -> None:
         self.repository = repository
         self.delivery_location_service = delivery_location_service
-        self.now_provider = now_provider or (
-            lambda: datetime.now(timezone.utc)
-        )
+        self.now_provider = now_provider or (lambda: datetime.now(timezone.utc))
 
     async def create_address(
         self,
@@ -49,9 +46,7 @@ class AddressService:
             await self.repository.count_active(user_id=user_id)
             >= MAXIMUM_ADDRESSES_PER_USER
         ):
-            raise AddressLimitExceededError(
-                "The user already has 15 active addresses"
-            )
+            raise AddressLimitExceededError("The user already has 15 active addresses")
 
         resolved = await self.delivery_location_service.resolve(request)
         current_time = self._current_time()
@@ -89,9 +84,7 @@ class AddressService:
             )
             return address
 
-        address = await self.repository.run_in_transaction(
-            create_in_transaction
-        )
+        address = await self.repository.run_in_transaction(create_in_transaction)
         return UserAddressResponse(
             status="success",
             message="Address created successfully",
@@ -123,10 +116,7 @@ class AddressService:
         return UserAddressListResponse(
             status="success",
             message="Addresses queried successfully",
-            addresses=[
-                UserAddressData.from_document(address)
-                for address in addresses
-            ],
+            addresses=[UserAddressData.from_document(address) for address in addresses],
         )
 
     async def update_address(
@@ -166,9 +156,7 @@ class AddressService:
                 raise AddressNotFoundError("Address not found")
             return address
 
-        address = await self.repository.run_in_transaction(
-            update_in_transaction
-        )
+        address = await self.repository.run_in_transaction(update_in_transaction)
         return UserAddressResponse(
             status="success",
             message="Address updated successfully",
@@ -219,9 +207,7 @@ class AddressService:
                 raise AddressNotFoundError("Address not found")
             return result
 
-        address = await self.repository.run_in_transaction(
-            set_default_in_transaction
-        )
+        address = await self.repository.run_in_transaction(set_default_in_transaction)
         return UserAddressResponse(
             status="success",
             message="Default address updated successfully",
@@ -289,7 +275,5 @@ class AddressService:
     def _current_time(self) -> datetime:
         current_time = self.now_provider()
         if current_time.tzinfo is None:
-            raise RuntimeError(
-                "now_provider must return a timezone-aware datetime"
-            )
+            raise RuntimeError("now_provider must return a timezone-aware datetime")
         return current_time.astimezone(timezone.utc)

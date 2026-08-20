@@ -1,0 +1,25 @@
+# Local IDE settings
+.vscode/
+.idea/
+
+# Python environments and caches
+**/.venv/
+**/venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local secrets and runtime output
+**/.env
+*.log
+.coverage
+htmlcov/
+
+# Build output
+build/
+dist/
+*.egg-info/
+
+# Operating system files
+.DS_Store
+Thumbs.db

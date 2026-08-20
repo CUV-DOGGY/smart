@@ -168,6 +168,21 @@ textarea { resize: vertical; }
 .order-modal dt { color: var(--muted); }
 .order-modal dd { margin: 0; overflow-wrap: anywhere; }
 
+.agent-status { margin: 0 24px 8px; color: var(--muted); font-size: 13px; }
+.confirmation-card {
+  margin: 0 24px 14px;
+  padding: 16px 18px;
+  border: 1px solid rgba(217, 119, 6, .35);
+  border-radius: 16px;
+  background: #fff7ed;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.confirmation-card p { margin: 4px 0 0; color: var(--muted); }
+.confirmation-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 82px minmax(0, 1fr); }
   .app-nav { padding: 18px 10px; }
@@ -195,6 +210,8 @@ textarea { resize: vertical; }
   .message-list { padding: 20px 14px; }
   .chat-composer { margin: 0 12px 12px; }
   .chat-error { margin: 0 12px 8px; }
+  .confirmation-card { margin: 0 12px 10px; align-items: stretch; flex-direction: column; }
+  .confirmation-actions button { flex: 1; }
   .message-bubble { max-width: 86%; }
   .product-list article { grid-template-columns: 1fr auto; }
   .product-list .quantity { grid-column: 1 / -1; justify-self: end; }

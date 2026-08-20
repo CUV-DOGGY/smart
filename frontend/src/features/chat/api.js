@@ -15,9 +15,17 @@ export const conversationApi = {
 };
 
 export async function streamChat(payload, { signal, onEvent }) {
+  return streamEndpoint('/chat/stream', payload, { signal, onEvent });
+}
+
+export async function resumeChat(payload, { signal, onEvent }) {
+  return streamEndpoint('/chat/resume', payload, { signal, onEvent });
+}
+
+async function streamEndpoint(path, payload, { signal, onEvent }) {
   let response;
   try {
-    response = await fetch(`${env.apiBaseUrl}/chat/stream`, {
+    response = await fetch(`${env.apiBaseUrl}${path}`, {
       method: 'POST',
       signal,
       headers: {

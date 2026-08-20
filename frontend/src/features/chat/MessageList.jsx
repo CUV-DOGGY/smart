@@ -8,7 +8,7 @@ export function MessageList({ messages, streamingText }) {
       <div className="chat-welcome">
         <div className="brand-mark">S</div>
         <h2>你好，我是 SmartServe</h2>
-        <p>可以咨询商品、配送与售后问题。业务操作请前往地址或订单页面。</p>
+        <p>可以查询店铺、商品、地址和订单，也可以在明确确认后安全地下单或修改业务状态。</p>
       </div>
     );
   }

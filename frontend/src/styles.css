@@ -140,9 +140,11 @@ textarea { resize: vertical; }
 .modal > footer { justify-content: flex-end; border-top: 1px solid var(--line); }
 .modal h2 { margin: 0; }
 .map-search { display: flex; gap: 9px; padding: 13px 20px; }
-.map-container { position: relative; width: 100%; height: min(52vh, 480px); background: #edf3f2; }
-.map-container .screen-center { min-height: 100%; }
+.map-stage { position: relative; }
+.map-container { width: 100%; height: min(52vh, 480px); background: #edf3f2; }
+.map-loading { position: absolute; inset: 0; display: grid; place-items: center; background: #edf3f2; color: var(--muted); }
 .map-modal > .alert { margin: 12px 20px; }
+.map-fallback { padding: 18px; }
 .map-selection { display: grid; gap: 3px; padding: 13px 20px; }
 .map-selection small { color: var(--muted); }
 

@@ -12,7 +12,10 @@ describe('MessageList', () => {
       />,
     );
     const list = container.querySelector('.message-list');
-    Object.defineProperty(list, 'scrollHeight', { configurable: true, value: 420 });
+    Object.defineProperty(list, 'scrollHeight', {
+      configurable: true,
+      value: 420,
+    });
 
     rerender(
       <MessageList
@@ -27,11 +30,15 @@ describe('MessageList', () => {
   it('renders a safe fallback for invalid persisted content', () => {
     render(
       <MessageList
-        messages={[{ message_id: 'a1', role: 'assistant', content: { text: 'bad' } }]}
+        messages={[
+          { message_id: 'a1', role: 'assistant', content: { text: 'bad' } },
+        ]}
         streamingText=""
       />,
     );
 
-    expect(screen.getByText('消息内容格式异常，请刷新会话后重试。')).toBeInTheDocument();
+    expect(
+      screen.getByText('消息内容格式异常，请刷新会话后重试。'),
+    ).toBeInTheDocument();
   });
 });

@@ -18,7 +18,10 @@ export function RegisterPage() {
     setSubmitting(true);
     setError('');
     try {
-      await authApi.register({ username: form.username, password: form.password });
+      await authApi.register({
+        username: form.username,
+        password: form.password,
+      });
       navigate('/login', { replace: true });
     } catch (requestError) {
       setError(requestError.message || '注册失败');
@@ -34,13 +37,47 @@ export function RegisterPage() {
         <p className="eyebrow">CREATE ACCOUNT</p>
         <h1>创建账号</h1>
         <form onSubmit={submit} className="stack-form">
-          <label>用户名<input required minLength="3" maxLength="32" autoComplete="username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
-          <label>密码<input required minLength="8" maxLength="128" type="password" autoComplete="new-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
-          <label>确认密码<input required type="password" autoComplete="new-password" value={form.confirm} onChange={(e) => setForm({ ...form, confirm: e.target.value })} /></label>
+          <label>
+            用户名
+            <input
+              required
+              minLength="3"
+              maxLength="32"
+              autoComplete="username"
+              value={form.username}
+              onChange={(e) => setForm({ ...form, username: e.target.value })}
+            />
+          </label>
+          <label>
+            密码
+            <input
+              required
+              minLength="8"
+              maxLength="128"
+              type="password"
+              autoComplete="new-password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+            />
+          </label>
+          <label>
+            确认密码
+            <input
+              required
+              type="password"
+              autoComplete="new-password"
+              value={form.confirm}
+              onChange={(e) => setForm({ ...form, confirm: e.target.value })}
+            />
+          </label>
           {error && <div className="alert error">{error}</div>}
-          <button className="primary" disabled={submitting}>{submitting ? '注册中…' : '注册'}</button>
+          <button className="primary" disabled={submitting}>
+            {submitting ? '注册中…' : '注册'}
+          </button>
         </form>
-        <p className="auth-link">已有账号？<Link to="/login">返回登录</Link></p>
+        <p className="auth-link">
+          已有账号？<Link to="/login">返回登录</Link>
+        </p>
       </section>
     </main>
   );

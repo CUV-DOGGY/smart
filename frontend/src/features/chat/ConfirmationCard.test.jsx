@@ -4,9 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ConfirmationCard } from './ConfirmationCard.jsx';
 
-
 afterEach(cleanup);
-
 
 describe('ConfirmationCard', () => {
   const confirmation = {
@@ -17,7 +15,9 @@ describe('ConfirmationCard', () => {
 
   it('renders the server summary and emits structured decisions', () => {
     const onDecision = vi.fn();
-    render(<ConfirmationCard confirmation={confirmation} onDecision={onDecision} />);
+    render(
+      <ConfirmationCard confirmation={confirmation} onDecision={onDecision} />,
+    );
     expect(screen.getByText(confirmation.summary)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '批准执行' }));
     fireEvent.click(screen.getByRole('button', { name: '拒绝' }));
@@ -26,7 +26,13 @@ describe('ConfirmationCard', () => {
   });
 
   it('disables both actions while a resume request is running', () => {
-    render(<ConfirmationCard confirmation={confirmation} disabled onDecision={() => {}} />);
+    render(
+      <ConfirmationCard
+        confirmation={confirmation}
+        disabled
+        onDecision={() => {}}
+      />,
+    );
     expect(screen.getByRole('button', { name: '批准执行' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '拒绝' })).toBeDisabled();
   });
@@ -61,7 +67,12 @@ describe('ConfirmationCard', () => {
       },
     };
 
-    render(<ConfirmationCard confirmation={orderConfirmation} onDecision={onDecision} />);
+    render(
+      <ConfirmationCard
+        confirmation={orderConfirmation}
+        onDecision={onDecision}
+      />,
+    );
 
     expect(screen.getByRole('table')).toHaveTextContent('香辣鸡腿堡');
     expect(screen.getByText('小高 · 138****8000')).toBeInTheDocument();

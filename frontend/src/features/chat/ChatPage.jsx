@@ -3,9 +3,19 @@ import { useDispatch, useSelector } from 'react-redux';
 
 import { conversationApi, resumeChat, streamChat } from './api.js';
 import {
-  addUserMessage, appendDelta, cancelStream, failStream, finishStream,
-  selectConversation, setConversationId, setConversations, setMessages,
-  setPendingConfirmation, setStatus, startNewConversation, startResume,
+  addUserMessage,
+  appendDelta,
+  cancelStream,
+  failStream,
+  finishStream,
+  selectConversation,
+  setConversationId,
+  setConversations,
+  setMessages,
+  setPendingConfirmation,
+  setStatus,
+  startNewConversation,
+  startResume,
 } from './chatSlice.js';
 import { ConfirmationCard } from './ConfirmationCard.jsx';
 import { ChatComposer } from './ChatComposer.jsx';
@@ -46,12 +56,14 @@ export function ChatPage() {
   const send = async (content) => {
     const controller = new AbortController();
     controllerRef.current = controller;
-    dispatch(addUserMessage({
-      message_id: crypto.randomUUID(),
-      role: 'user',
-      content,
-      created_at: new Date().toISOString(),
-    }));
+    dispatch(
+      addUserMessage({
+        message_id: crypto.randomUUID(),
+        role: 'user',
+        content,
+        created_at: new Date().toISOString(),
+      }),
+    );
     let completed = false;
     let streamError = null;
     try {
@@ -60,10 +72,12 @@ export function ChatPage() {
         {
           signal: controller.signal,
           onEvent(event) {
-            if (event.type === 'meta') dispatch(setConversationId(event.conversation_id));
+            if (event.type === 'meta')
+              dispatch(setConversationId(event.conversation_id));
             if (event.type === 'token') dispatch(appendDelta(event.delta));
             if (event.type === 'status') dispatch(setStatus(event.label));
-            if (event.type === 'confirmation_required') dispatch(setPendingConfirmation(event));
+            if (event.type === 'confirmation_required')
+              dispatch(setPendingConfirmation(event));
             if (event.type === 'done') {
               completed = true;
               dispatch(finishStream(event));
@@ -75,7 +89,8 @@ export function ChatPage() {
           },
         },
       );
-      if (!completed && !streamError) dispatch(failStream('流式连接意外结束，请重试'));
+      if (!completed && !streamError)
+        dispatch(failStream('流式连接意外结束，请重试'));
       await loadConversations();
     } catch (error) {
       if (error.name === 'AbortError') dispatch(cancelStream());
@@ -92,22 +107,25 @@ export function ChatPage() {
     dispatch(startResume());
     let completed = false;
     try {
-      await resumeChat({
-        conversation_id: chat.currentId,
-        interrupt_id: chat.pendingConfirmation.interrupt_id,
-        decision,
-      }, {
-        signal: controller.signal,
-        onEvent(event) {
-          if (event.type === 'token') dispatch(appendDelta(event.delta));
-          if (event.type === 'status') dispatch(setStatus(event.label));
-          if (event.type === 'done') {
-            completed = true;
-            dispatch(finishStream(event));
-          }
-          if (event.type === 'error') dispatch(failStream(event.message));
+      await resumeChat(
+        {
+          conversation_id: chat.currentId,
+          interrupt_id: chat.pendingConfirmation.interrupt_id,
+          decision,
         },
-      });
+        {
+          signal: controller.signal,
+          onEvent(event) {
+            if (event.type === 'token') dispatch(appendDelta(event.delta));
+            if (event.type === 'status') dispatch(setStatus(event.label));
+            if (event.type === 'done') {
+              completed = true;
+              dispatch(finishStream(event));
+            }
+            if (event.type === 'error') dispatch(failStream(event.message));
+          },
+        },
+      );
       if (!completed) dispatch(failStream('确认连接意外结束，请重试'));
       await loadConversations();
     } catch (error) {
@@ -132,14 +150,50 @@ export function ChatPage() {
   const cancel = () => controllerRef.current?.abort();
   return (
     <section className="chat-page">
-      <ConversationPanel items={chat.conversations} currentId={chat.currentId} onSelect={chooseConversation} onNew={() => dispatch(startNewConversation())} onDelete={removeConversation} />
+      <ConversationPanel
+        items={chat.conversations}
+        currentId={chat.currentId}
+        onSelect={chooseConversation}
+        onNew={() => dispatch(startNewConversation())}
+        onDelete={removeConversation}
+      />
       <div className="chat-main">
-        <header className="page-header compact"><div><p className="eyebrow">AI CUSTOMER SERVICE</p><h1>智能客服</h1></div><span className="status-dot">在线</span></header>
-        <MessageList messages={chat.messages} streamingText={chat.streamingText} />
-        {chat.statusLabel && <div className="agent-status">{chat.statusLabel}</div>}
-        <ConfirmationCard confirmation={chat.pendingConfirmation} disabled={chat.isStreaming} onDecision={decide} />
-        {chat.error && <div className="alert error chat-error">{chat.error}{chat.lastMessage && <button className="ghost" onClick={() => send(chat.lastMessage)}>重试</button>}</div>}
-        {!chat.pendingConfirmation && <ChatComposer disabled={chat.isStreaming} onSend={send} onCancel={cancel} />}
+        <header className="page-header compact">
+          <div>
+            <p className="eyebrow">AI CUSTOMER SERVICE</p>
+            <h1>智能客服</h1>
+          </div>
+          <span className="status-dot">在线</span>
+        </header>
+        <MessageList
+          messages={chat.messages}
+          streamingText={chat.streamingText}
+        />
+        {chat.statusLabel && (
+          <div className="agent-status">{chat.statusLabel}</div>
+        )}
+        <ConfirmationCard
+          confirmation={chat.pendingConfirmation}
+          disabled={chat.isStreaming}
+          onDecision={decide}
+        />
+        {chat.error && (
+          <div className="alert error chat-error">
+            {chat.error}
+            {chat.lastMessage && (
+              <button className="ghost" onClick={() => send(chat.lastMessage)}>
+                重试
+              </button>
+            )}
+          </div>
+        )}
+        {!chat.pendingConfirmation && (
+          <ChatComposer
+            disabled={chat.isStreaming}
+            onSend={send}
+            onCancel={cancel}
+          />
+        )}
       </div>
     </section>
   );

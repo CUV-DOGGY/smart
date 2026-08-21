@@ -7,10 +7,14 @@ export const conversationApi = {
     return authenticatedJson('/conversations');
   },
   async messages(id) {
-    return authenticatedJson(`/conversations/${encodeURIComponent(id)}/messages`);
+    return authenticatedJson(
+      `/conversations/${encodeURIComponent(id)}/messages`,
+    );
   },
   async remove(id) {
-    return authenticatedJson(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return authenticatedJson(`/conversations/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    });
   },
 };
 
@@ -58,12 +62,17 @@ async function streamEndpoint(path, payload, { signal, onEvent }) {
 export function createSseParser(onEvent) {
   let buffer = '';
   const consume = (block) => {
-    const data = block.split(/\r?\n/)
+    const data = block
+      .split(/\r?\n/)
       .filter((line) => line.startsWith('data:'))
       .map((line) => line.slice(5).trimStart())
       .join('\n');
     if (!data) return;
-    try { onEvent(JSON.parse(data)); } catch { /* ignore malformed event */ }
+    try {
+      onEvent(JSON.parse(data));
+    } catch {
+      /* ignore malformed event */
+    }
   };
   return {
     push(text) {

@@ -6,7 +6,9 @@ import { AuthBootstrap } from './features/auth/AuthBootstrap.jsx';
 export default function App() {
   return (
     <BrowserRouter>
-      <AuthBootstrap><AppRoutes /></AuthBootstrap>
+      <AuthBootstrap>
+        <AppRoutes />
+      </AuthBootstrap>
     </BrowserRouter>
   );
 }

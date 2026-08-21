@@ -15,15 +15,34 @@ export function AppShell() {
   return (
     <div className="app-shell">
       <aside className="app-nav">
-        <div className="brand"><span className="brand-mark small">S</span><div><strong>SmartServe</strong><small>AI 客服工作台</small></div></div>
+        <div className="brand">
+          <span className="brand-mark small">S</span>
+          <div>
+            <strong>SmartServe</strong>
+            <small>AI 客服工作台</small>
+          </div>
+        </div>
         <nav>
           <NavLink to="/chat">💬 智能客服</NavLink>
           <NavLink to="/addresses">⌖ 收货地址</NavLink>
           <NavLink to="/orders">▤ 我的订单</NavLink>
         </nav>
-        <div className="nav-user"><span className="avatar">{user?.username?.slice(0, 1).toUpperCase()}</span><div><strong>{user?.username}</strong><small>已安全登录</small></div><button className="ghost" onClick={logout}>退出</button></div>
+        <div className="nav-user">
+          <span className="avatar">
+            {user?.username?.slice(0, 1).toUpperCase()}
+          </span>
+          <div>
+            <strong>{user?.username}</strong>
+            <small>已安全登录</small>
+          </div>
+          <button className="ghost" onClick={logout}>
+            退出
+          </button>
+        </div>
       </aside>
-      <main className="app-content"><Outlet /></main>
+      <main className="app-content">
+        <Outlet />
+      </main>
     </div>
   );
 }

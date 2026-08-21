@@ -14,7 +14,9 @@ const chatSlice = createSlice({
     statusLabel: null,
   },
   reducers: {
-    setConversations(state, action) { state.conversations = action.payload; },
+    setConversations(state, action) {
+      state.conversations = action.payload;
+    },
     selectConversation(state, action) {
       state.currentId = action.payload;
       state.messages = [];
@@ -30,7 +32,9 @@ const chatSlice = createSlice({
       state.pendingConfirmation = null;
       state.statusLabel = null;
     },
-    setMessages(state, action) { state.messages = action.payload; },
+    setMessages(state, action) {
+      state.messages = action.payload;
+    },
     addUserMessage(state, action) {
       state.messages.push(action.payload);
       state.lastMessage = action.payload.content;
@@ -39,14 +43,20 @@ const chatSlice = createSlice({
       state.error = null;
       state.statusLabel = '正在理解问题';
     },
-    setConversationId(state, action) { state.currentId = action.payload; },
+    setConversationId(state, action) {
+      state.currentId = action.payload;
+    },
     appendDelta(state, action) {
-      if (typeof action.payload === 'string') state.streamingText += action.payload;
+      if (typeof action.payload === 'string')
+        state.streamingText += action.payload;
     },
     setStatus(state, action) {
-      state.statusLabel = typeof action.payload === 'string' ? action.payload : null;
+      state.statusLabel =
+        typeof action.payload === 'string' ? action.payload : null;
     },
-    setPendingConfirmation(state, action) { state.pendingConfirmation = action.payload; },
+    setPendingConfirmation(state, action) {
+      state.pendingConfirmation = action.payload;
+    },
     startResume(state) {
       state.isStreaming = true;
       state.streamingText = '';
@@ -65,7 +75,8 @@ const chatSlice = createSlice({
       state.streamingText = '';
       state.isStreaming = false;
       state.statusLabel = null;
-      if (action.payload.outcome === 'completed') state.pendingConfirmation = null;
+      if (action.payload.outcome === 'completed')
+        state.pendingConfirmation = null;
     },
     failStream(state, action) {
       state.error = action.payload;
@@ -83,8 +94,18 @@ const chatSlice = createSlice({
 });
 
 export const {
-  setConversations, selectConversation, startNewConversation, setMessages,
-  addUserMessage, setConversationId, appendDelta, finishStream, failStream,
-  cancelStream, setPendingConfirmation, setStatus, startResume,
+  setConversations,
+  selectConversation,
+  startNewConversation,
+  setMessages,
+  addUserMessage,
+  setConversationId,
+  appendDelta,
+  finishStream,
+  failStream,
+  cancelStream,
+  setPendingConfirmation,
+  setStatus,
+  startResume,
 } = chatSlice.actions;
 export default chatSlice.reducer;

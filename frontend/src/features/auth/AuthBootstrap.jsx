@@ -19,16 +19,18 @@ export function AuthBootstrap({ children }) {
     if (!tokenStorage.get()) {
       dispatch(anonymous());
     } else {
-      authApi.me().then(
-        (user) => dispatch(authenticated(user)),
-        logout,
-      );
+      authApi.me().then((user) => dispatch(authenticated(user)), logout);
     }
     return unregister;
   }, [dispatch]);
 
   if (status === 'checking') {
-    return <div className="screen-center"><div className="spinner" />正在恢复登录状态…</div>;
+    return (
+      <div className="screen-center">
+        <div className="spinner" />
+        正在恢复登录状态…
+      </div>
+    );
   }
   return children;
 }

@@ -16,7 +16,10 @@ async function loadAmap() {
     plugins: ['AMap.Geocoder', 'AMap.ToolBar'],
   }).catch((error) => {
     loaderPromise = null;
-    throw amapError(error, '高德地图加载失败，请检查 JSAPI Key、安全密钥和域名白名单');
+    throw amapError(
+      error,
+      '高德地图加载失败，请检查 JSAPI Key、安全密钥和域名白名单',
+    );
   });
   return loaderPromise;
 }
@@ -36,7 +39,10 @@ export class AmapPickerAdapter {
     this.AMap = await loadAmap();
     if (this.disposed || !container?.isConnected) return;
     const center = initialLocation || [116.397428, 39.90923];
-    this.map = new this.AMap.Map(container, { zoom: initialLocation ? 16 : 11, center });
+    this.map = new this.AMap.Map(container, {
+      zoom: initialLocation ? 16 : 11,
+      center,
+    });
     this.map.addControl(new this.AMap.ToolBar({ position: 'RT' }));
     this.geocoder = new this.AMap.Geocoder();
     this.marker = new this.AMap.Marker({ position: center, draggable: true });
@@ -64,9 +70,19 @@ export class AmapPickerAdapter {
     const city = text(component.city) || province;
     const district = text(component.district);
     const formatted = text(regeocode.formattedAddress);
-    const detail = formatted.replace(province, '').replace(city === province ? '' : city, '').replace(district, '').trim();
-    const lng = typeof location.getLng === 'function' ? location.getLng() : Number(location[0]);
-    const lat = typeof location.getLat === 'function' ? location.getLat() : Number(location[1]);
+    const detail = formatted
+      .replace(province, '')
+      .replace(city === province ? '' : city, '')
+      .replace(district, '')
+      .trim();
+    const lng =
+      typeof location.getLng === 'function'
+        ? location.getLng()
+        : Number(location[0]);
+    const lat =
+      typeof location.getLat === 'function'
+        ? location.getLat()
+        : Number(location[1]);
     this.onLocation({
       longitude: lng,
       latitude: lat,
@@ -105,10 +121,13 @@ export class AmapPickerAdapter {
 export function amapError(error, fallback) {
   if (error instanceof Error && error.message) return error;
   if (typeof error === 'string' && error.trim()) return new Error(error.trim());
-  const message = error && typeof error === 'object'
-    ? (error.message || error.info || error.status)
-    : '';
-  return new Error(typeof message === 'string' && message.trim() ? message.trim() : fallback);
+  const message =
+    error && typeof error === 'object'
+      ? error.message || error.info || error.status
+      : '';
+  return new Error(
+    typeof message === 'string' && message.trim() ? message.trim() : fallback,
+  );
 }
 
 function text(value) {

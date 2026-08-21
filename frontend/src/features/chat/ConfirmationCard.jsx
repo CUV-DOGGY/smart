@@ -1,10 +1,8 @@
 import { OrderConfirmationCard } from './OrderConfirmationCard.jsx';
 
-
 const confirmationPresenters = {
   order: OrderConfirmationCard,
 };
-
 
 export function ConfirmationCard({ confirmation, disabled, onDecision }) {
   if (!confirmation) return null;
@@ -26,8 +24,20 @@ export function ConfirmationCard({ confirmation, disabled, onDecision }) {
         <p>只有点击“批准执行”后，系统才会调用真实业务服务。</p>
       </div>
       <div className="confirmation-actions">
-        <button className="secondary" disabled={disabled} onClick={() => onDecision('reject')}>拒绝</button>
-        <button className="primary" disabled={disabled} onClick={() => onDecision('approve')}>批准执行</button>
+        <button
+          className="secondary"
+          disabled={disabled}
+          onClick={() => onDecision('reject')}
+        >
+          拒绝
+        </button>
+        <button
+          className="primary"
+          disabled={disabled}
+          onClick={() => onDecision('approve')}
+        >
+          批准执行
+        </button>
       </div>
     </section>
   );

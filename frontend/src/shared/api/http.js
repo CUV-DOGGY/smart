@@ -4,7 +4,13 @@ import { tokenStorage } from '../storage/tokenStorage.js';
 let unauthorizedHandler = null;
 
 export class ApiClientError extends Error {
-  constructor({ status = 0, code = 'NETWORK_ERROR', message = '网络连接失败', fieldErrors = [], requestId = null }) {
+  constructor({
+    status = 0,
+    code = 'NETWORK_ERROR',
+    message = '网络连接失败',
+    fieldErrors = [],
+    requestId = null,
+  }) {
     super(message);
     this.name = 'ApiClientError';
     this.status = status;
@@ -25,7 +31,11 @@ export async function http(path, options = {}) {
   const headers = new Headers(options.headers || {});
   const token = tokenStorage.get();
   if (token) headers.set('Authorization', `Bearer ${token}`);
-  if (options.body && !(options.body instanceof FormData) && !headers.has('Content-Type')) {
+  if (
+    options.body &&
+    !(options.body instanceof FormData) &&
+    !headers.has('Content-Type')
+  ) {
     headers.set('Content-Type', 'application/json');
   }
 

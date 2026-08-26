@@ -4,7 +4,15 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.constants.write_command_status import WriteCommandStatus
-from app.schemas.order import OrderConfirmationPreview
+from app.schemas.order import (
+    OrderCancellationConfirmationPreview,
+    OrderConfirmationPreview,
+)
+
+
+WriteCommandPresentation = (
+    OrderConfirmationPreview | OrderCancellationConfirmationPreview
+)
 
 
 class WriteCommandConfirmation(BaseModel):
@@ -17,7 +25,7 @@ class WriteCommandConfirmation(BaseModel):
     status: Literal["awaiting_confirmation"] = "awaiting_confirmation"
     version: int = Field(ge=1)
     expires_at: datetime
-    presentation: OrderConfirmationPreview | None = None
+    presentation: WriteCommandPresentation | None = None
 
 
 class WriteCommandView(BaseModel):
@@ -26,7 +34,7 @@ class WriteCommandView(BaseModel):
     status: WriteCommandStatus
     version: int
     summary: str
-    presentation: OrderConfirmationPreview | None = None
+    presentation: WriteCommandPresentation | None = None
     result: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
     expires_at: datetime

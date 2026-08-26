@@ -1,6 +1,11 @@
 import unittest
+from datetime import datetime, timezone
 
-from app.schemas.order import OrderConfirmationPreview
+from app.constants.order_status import OrderStatus
+from app.schemas.order import (
+    OrderCancellationConfirmationPreview,
+    OrderConfirmationPreview,
+)
 from app.services.address_service import AddressNotFoundError
 from app.tools.service_tools import ServiceToolRegistry
 
@@ -8,6 +13,7 @@ from app.tools.service_tools import ServiceToolRegistry
 class PreviewOrderService:
     def __init__(self):
         self.calls = []
+        self.cancellation_calls = []
 
     async def preview_order(self, order, user_id):
         self.calls.append((order, user_id))
@@ -27,6 +33,24 @@ class PreviewOrderService:
             }],
             goods_amount=25.0,
             delivery_fee=5.0,
+            total_price=30.0,
+        )
+
+    async def preview_order_cancellation(self, order_id, user_id):
+        self.cancellation_calls.append((order_id, user_id))
+        return OrderCancellationConfirmationPreview(
+            order_id=order_id,
+            shop_id="shop-001",
+            shop_name="测试店铺",
+            items=[{
+                "food_id": "food-001",
+                "food_name": "测试商品",
+                "quantity": 2,
+                "unit_price": 12.5,
+                "line_total": 25.0,
+            }],
+            current_status=OrderStatus.PREPARING,
+            create_time=datetime(2026, 8, 26, 12, 0, tzinfo=timezone.utc),
             total_price=30.0,
         )
 
@@ -56,6 +80,30 @@ class ServiceToolConfirmationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("user_id", result["presentation"])
         self.assertEqual(result["presentation"]["total_price"], 30.0)
         self.assertEqual(order_service.calls[0][1], "user-001")
+
+    async def test_cancel_order_confirmation_is_safe_and_structured(self):
+        order_service = PreviewOrderService()
+        registry = ServiceToolRegistry(
+            catalog_service=object(),
+            address_service=object(),
+            order_service=order_service,
+        )
+
+        result = await registry.prepare_confirmation(
+            "cancel_order",
+            {"order_id": "order-001"},
+            user_id="user-001",
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["presentation"]["kind"], "order_cancellation")
+        self.assertEqual(result["presentation"]["order_id"], "order-001")
+        self.assertEqual(result["presentation"]["current_status"], "preparing")
+        self.assertEqual(result["presentation"]["total_price"], 30.0)
+        self.assertEqual(
+            order_service.cancellation_calls,
+            [("order-001", "user-001")],
+        )
 
     async def test_transactional_write_failure_escapes_for_full_rollback(self):
         class FailingAddressService:

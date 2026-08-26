@@ -175,6 +175,16 @@ class ServiceToolRegistry:
                     "summary": f"请确认来自 {preview.shop_name} 的订单",
                     "presentation": presentation,
                 }
+            if name == "cancel_order":
+                preview = await self.order_service.preview_order_cancellation(
+                    arguments["order_id"],
+                    user_id,
+                )
+                return {
+                    "ok": True,
+                    "summary": f"请确认取消订单 {preview.order_id}",
+                    "presentation": preview.model_dump(mode="json"),
+                }
             return {
                 "ok": True,
                 "summary": self.confirmation_summary(name, arguments),

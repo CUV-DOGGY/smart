@@ -49,6 +49,24 @@ class FakeRegistry:
                 "total_price": 30.0,
                 "currency": "CNY",
             }
+        if name == "cancel_order":
+            result["presentation"] = {
+                "kind": "order_cancellation",
+                "order_id": arguments["order_id"],
+                "shop_id": "shop-001",
+                "shop_name": "测试店铺",
+                "items": [{
+                    "food_id": "food-001",
+                    "food_name": "测试商品",
+                    "quantity": 2,
+                    "unit_price": 12.5,
+                    "line_total": 25.0,
+                }],
+                "current_status": "preparing",
+                "create_time": "2026-08-26T12:00:00Z",
+                "total_price": 30.0,
+                "currency": "CNY",
+            }
         return result
 
     async def execute(self, name, arguments, *, user_id, action_id):
@@ -195,6 +213,11 @@ class AgentGraphTests(unittest.IsolatedAsyncioTestCase):
         snapshot = await graph.aget_state(config)
         self.assertEqual(registry.calls, [])
         payload = snapshot.tasks[0].interrupts[0].value
+        self.assertEqual(
+            payload["presentation"]["kind"],
+            "order_cancellation",
+        )
+        self.assertEqual(payload["presentation"]["order_id"], "order-001")
         commands.finish(
             payload["command_id"],
             status="succeeded",

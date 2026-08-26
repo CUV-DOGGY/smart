@@ -24,6 +24,7 @@ from app.schemas.order import (
     OrderCancelResponse,
     OrderCreate,
     OrderCreateResponse,
+    OrderCancellationConfirmationPreview,
     OrderConfirmationItem,
     OrderConfirmationPreview,
     OrderHistoryItem,
@@ -280,6 +281,43 @@ class OrderService:
             goods_amount=prepared.goods_amount,
             delivery_fee=prepared.delivery_fee,
             total_price=prepared.total_price,
+        )
+
+    async def preview_order_cancellation(
+        self,
+        order_id: str,
+        user_id: str,
+    ) -> OrderCancellationConfirmationPreview:
+        """Build a cancellable order snapshot without changing its state."""
+
+        order = await self.repository.query_order_by_id(order_id, user_id)
+        if order is None:
+            raise OrderNotFoundError("Order not found or not accessible")
+
+        current_status = OrderStatus(order["order_status"])
+        if not can_transition(current_status, OrderStatus.CANCELING):
+            raise OrderStateConflictError(
+                "Current order status cannot be canceled",
+                current_status=current_status,
+            )
+
+        return OrderCancellationConfirmationPreview(
+            order_id=order["order_id"],
+            shop_id=order["shop_id"],
+            shop_name=order.get("shop_name") or order["shop_id"],
+            items=[
+                OrderConfirmationItem(
+                    food_id=item["food_id"],
+                    food_name=item["food_name"],
+                    quantity=item["quantity"],
+                    unit_price=item["price"],
+                    line_total=item["price"] * item["quantity"],
+                )
+                for item in order["items"]
+            ],
+            current_status=current_status,
+            create_time=order["create_time"],
+            total_price=order["total_price"],
         )
 
     async def _prepare_order(

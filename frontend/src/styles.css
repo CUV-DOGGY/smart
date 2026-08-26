@@ -1024,6 +1024,40 @@ textarea {
   font-size: 11px;
   line-height: 1.5;
 }
+.order-cancellation-card {
+  border-color: #f2c5ba;
+}
+.order-cancellation-card .order-confirmation-header {
+  background: linear-gradient(135deg, #fff4f1, #fff);
+}
+.order-cancellation-card .order-confirmation-icon {
+  background: #c2412d;
+  box-shadow: 0 7px 18px rgba(194, 65, 45, 0.2);
+}
+.order-cancellation-card .confirmation-badge {
+  color: #9f2f20;
+  background: #fee4de;
+}
+.cancellation-order-meta {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.cancellation-order-meta > div {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+}
+.cancellation-order-meta dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.cancellation-order-meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 700;
+}
 
 @media (max-width: 980px) {
   .app-shell {

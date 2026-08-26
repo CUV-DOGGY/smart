@@ -72,6 +72,20 @@ class OrderConfirmationPreview(BaseModel):
     currency: Literal["CNY"] = "CNY"
 
 
+class OrderCancellationConfirmationPreview(BaseModel):
+    """Read-only order snapshot shown before a cancellation is approved."""
+
+    kind: Literal["order_cancellation"] = "order_cancellation"
+    order_id: str
+    shop_id: str
+    shop_name: str
+    items: List[OrderConfirmationItem]
+    current_status: OrderStatus
+    create_time: datetime
+    total_price: float = Field(ge=0, allow_inf_nan=False)
+    currency: Literal["CNY"] = "CNY"
+
+
 class OrderQueryByIdData(BaseModel):
     """订单"""
     order_id: str= Field(min_length=1)

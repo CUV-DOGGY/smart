@@ -1,7 +1,9 @@
+import { OrderCancellationConfirmationCard } from './OrderCancellationConfirmationCard.jsx';
 import { OrderConfirmationCard } from './OrderConfirmationCard.jsx';
 
 const confirmationPresenters = {
   order: OrderConfirmationCard,
+  order_cancellation: OrderCancellationConfirmationCard,
 };
 
 export function ConfirmationCard({ confirmation, disabled, onDecision }) {

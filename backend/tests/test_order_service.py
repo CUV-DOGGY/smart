@@ -647,6 +647,78 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order_repository.transaction_count, 0)
         self.assertIsNone(order_repository.created_order)
 
+    async def test_cancel_preview_returns_cancellable_order_without_writing(self):
+        class CancellationPreviewRepository:
+            def __init__(self):
+                self.queries = []
+
+            async def query_order_by_id(self, order_id: str, user_id: str):
+                self.queries.append((order_id, user_id))
+                return {
+                    "order_id": order_id,
+                    "user_id": user_id,
+                    "shop_id": "shop-001",
+                    "shop_name": "Test shop",
+                    "items": [{
+                        "food_id": "food-001",
+                        "food_name": "Test food",
+                        "quantity": 2,
+                        "price": 12.5,
+                    }],
+                    "order_status": OrderStatus.PREPARING.value,
+                    "create_time": TEST_NOW,
+                    "total_price": 30.0,
+                }
+
+        service, _, _, _ = self.make_service([make_product()])
+        repository = CancellationPreviewRepository()
+        service.repository = repository
+
+        preview = await service.preview_order_cancellation(
+            "order-001",
+            "user-001",
+        )
+
+        self.assertEqual(preview.kind, "order_cancellation")
+        self.assertEqual(preview.order_id, "order-001")
+        self.assertEqual(preview.current_status, OrderStatus.PREPARING)
+        self.assertEqual(preview.items[0].line_total, 25.0)
+        self.assertEqual(preview.total_price, 30.0)
+        self.assertEqual(repository.queries, [("order-001", "user-001")])
+
+    async def test_cancel_preview_rejects_non_cancellable_order(self):
+        class DeliveringOrderRepository:
+            async def query_order_by_id(self, order_id: str, user_id: str):
+                return {
+                    "order_id": order_id,
+                    "user_id": user_id,
+                    "shop_id": "shop-001",
+                    "shop_name": "Test shop",
+                    "items": [{
+                        "food_id": "food-001",
+                        "food_name": "Test food",
+                        "quantity": 2,
+                        "price": 12.5,
+                    }],
+                    "order_status": OrderStatus.DELIVERING.value,
+                    "create_time": TEST_NOW,
+                    "total_price": 30.0,
+                }
+
+        service, _, _, _ = self.make_service([make_product()])
+        service.repository = DeliveringOrderRepository()
+
+        with self.assertRaises(OrderStateConflictError) as raised:
+            await service.preview_order_cancellation(
+                "order-001",
+                "user-001",
+            )
+
+        self.assertEqual(
+            raised.exception.current_status,
+            OrderStatus.DELIVERING,
+        )
+
     async def test_cancel_failed_returns_latest_delivering_status(self):
         class MockOrderRepository:
             def __init__(self):

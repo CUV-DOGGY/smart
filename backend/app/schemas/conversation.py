@@ -24,8 +24,11 @@ class ChatResumeRequest(BaseModel):
 
 class PendingConfirmation(BaseModel):
     interrupt_id: str
+    command_id: str
     action: str
     summary: str
+    status: Literal["awaiting_confirmation"]
+    expires_at: datetime
     presentation: OrderConfirmationPreview | None = None
 
 

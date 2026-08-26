@@ -27,6 +27,16 @@ class Settings(BaseSettings):
     # Agent execution boundaries
     AGENT_RUN_TIMEOUT_SECONDS: int = Field(default=90, ge=10, le=300)
     AGENT_LOCK_LEASE_SECONDS: int = Field(default=120, ge=30, le=600)
+    WRITE_COMMAND_CONFIRMATION_TTL_SECONDS: int = Field(
+        default=900,
+        ge=60,
+        le=86400,
+    )
+    WRITE_COMMAND_EXECUTION_LEASE_SECONDS: int = Field(
+        default=120,
+        ge=30,
+        le=600,
+    )
 
     # 高德 Web 服务
     AMAP_WEB_SERVICE_KEY: SecretStr

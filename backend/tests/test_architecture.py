@@ -22,6 +22,14 @@ class ArchitectureBoundaryTests(unittest.TestCase):
         self.assertTrue((APP_ROOT / "constants" / "order_status.py").exists())
         self.assertTrue((APP_ROOT / "integrations" / "llm.py").exists())
 
+    def test_langgraph_cannot_call_the_write_executor(self):
+        graph_source = (APP_ROOT / "agents" / "graph.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("execute_write(", graph_source)
+        self.assertIn("execute_read(", graph_source)
+        self.assertIn("append_write_result", graph_source)
+
 
 if __name__ == "__main__":
     unittest.main()

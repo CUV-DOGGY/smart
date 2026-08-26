@@ -77,6 +77,7 @@ class OrderRepository:
         *,
         user_id: str,
         idempotency_key: str,
+        session: AsyncIOMotorClientSession | None = None,
     ) -> dict | None:
         try:
             return await self.order_collection.find_one(
@@ -85,6 +86,7 @@ class OrderRepository:
                     "idempotency_key": idempotency_key,
                 },
                 {"_id": 0},
+                session=session,
             )
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(
@@ -101,7 +103,12 @@ class OrderRepository:
             ) from exc
         return result
     
-    async def query_order_status(self, order_id: str, user_id: str):
+    async def query_order_status(
+        self,
+        order_id: str,
+        user_id: str,
+        session: AsyncIOMotorClientSession | None = None,
+    ):
         try:
             return await self.order_collection.find_one(
                 {
@@ -109,6 +116,7 @@ class OrderRepository:
                     "user_id": user_id,
                 },
                 {"_id": 0, "order_status": 1},
+                session=session,
             )
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(
@@ -195,6 +203,7 @@ class OrderRepository:
         user_id: str,
         expected_status: str,
         target_status: str,
+        session: AsyncIOMotorClientSession | None = None,
     ) -> bool:
         try:
             result = await self.order_collection.update_one(
@@ -204,6 +213,7 @@ class OrderRepository:
                     "order_status": expected_status,
                 },
                 {"$set": {"order_status": target_status}},
+                session=session,
             )
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(

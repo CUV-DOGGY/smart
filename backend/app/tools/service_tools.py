@@ -185,14 +185,15 @@ class ServiceToolRegistry:
                 return failure
             raise
 
-    async def execute(
+    async def execute_read(
         self,
         name: str,
         arguments: dict[str, Any],
         *,
         user_id: str,
-        action_id: str,
     ) -> dict[str, Any]:
+        if self.is_write(name):
+            raise ToolValidationFailure("WRITE_TOOL_REQUIRES_COMMAND_EXECUTOR")
         try:
             if name == "list_shops":
                 result = await self.catalog_service.list_shops()
@@ -219,29 +220,119 @@ class ServiceToolRegistry:
                 if result.order is None:
                     return {"ok": False, "code": "ORDER_NOT_FOUND", "message": "订单不存在或无权访问"}
                 return {"ok": True, "order": result.order.model_dump(mode="json", exclude={"user_id"})}
-            if name == "create_order":
-                request = OrderCreate.model_validate(arguments)
-                result = await self.order_service.create_order(
-                    request,
-                    user_id,
-                    idempotency_key=f"agent:{action_id}",
-                )
-                return {"ok": True, "order": result.model_dump(mode="json", exclude={"status", "message"})}
-            if name == "cancel_order":
-                result = await self.order_service.cancel_order(arguments["order_id"], user_id)
-                return {"ok": True, "order_id": arguments["order_id"], "order_status": result.order_status.value}
-            if name == "set_default_address":
-                result = await self.address_service.set_default(arguments["address_id"], user_id)
-                return {"ok": True, "address": result.address.model_dump(mode="json", exclude={"receiver_phone"})}
-            if name == "delete_address":
-                await self.address_service.delete_address(arguments["address_id"], user_id)
-                return {"ok": True, "address_id": arguments["address_id"]}
         except Exception as exc:
             failure = self._business_failure(exc)
             if failure is not None:
                 return failure
             raise
         raise ToolValidationFailure("UNKNOWN_TOOL")
+
+    @classmethod
+    def business_failure(cls, exc: Exception) -> dict[str, Any] | None:
+        return cls._business_failure(exc)
+
+    async def execute_write(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        user_id: str,
+        command_id: str,
+        session=None,
+    ) -> dict[str, Any]:
+        if not self.is_write(name):
+            raise ToolValidationFailure("READ_TOOL_CANNOT_USE_COMMAND_EXECUTOR")
+        try:
+            if name == "create_order":
+                request = OrderCreate.model_validate(arguments)
+                if session is None:
+                    result = await self.order_service.create_order(
+                        request,
+                        user_id,
+                        idempotency_key=f"command:{command_id}",
+                    )
+                else:
+                    result = await self.order_service.create_order(
+                        request,
+                        user_id,
+                        idempotency_key=f"command:{command_id}",
+                        session=session,
+                    )
+                return {"ok": True, "order": result.model_dump(mode="json", exclude={"status", "message"})}
+            if name == "cancel_order":
+                if session is None:
+                    result = await self.order_service.cancel_order(
+                        arguments["order_id"],
+                        user_id,
+                    )
+                else:
+                    result = await self.order_service.cancel_order(
+                        arguments["order_id"],
+                        user_id,
+                        session=session,
+                    )
+                return {"ok": True, "order_id": arguments["order_id"], "order_status": result.order_status.value}
+            if name == "set_default_address":
+                if session is None:
+                    result = await self.address_service.set_default(
+                        arguments["address_id"],
+                        user_id,
+                    )
+                else:
+                    result = await self.address_service.set_default(
+                        arguments["address_id"],
+                        user_id,
+                        session=session,
+                    )
+                return {"ok": True, "address": result.address.model_dump(mode="json", exclude={"receiver_phone"})}
+            if name == "delete_address":
+                if session is None:
+                    await self.address_service.delete_address(
+                        arguments["address_id"],
+                        user_id,
+                    )
+                else:
+                    await self.address_service.delete_address(
+                        arguments["address_id"],
+                        user_id,
+                        session=session,
+                    )
+                return {"ok": True, "address_id": arguments["address_id"]}
+        except Exception as exc:
+            # Business failures must leave the transaction callback so every
+            # partial domain mutation is rolled back. The command executor
+            # records a sanitized terminal result after that rollback.
+            if session is not None:
+                raise
+            failure = self._business_failure(exc)
+            if failure is not None:
+                return failure
+            raise
+        raise ToolValidationFailure("UNKNOWN_TOOL")
+
+    async def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        user_id: str,
+        action_id: str,
+    ) -> dict[str, Any]:
+        """Compatibility entry point for non-Agent callers and older tests.
+
+        The LangGraph runtime uses ``execute_read`` and the write command
+        executor uses ``execute_write`` so the business-write boundary is
+        enforced in the production path.
+        """
+
+        if self.is_write(name):
+            return await self.execute_write(
+                name,
+                arguments,
+                user_id=user_id,
+                command_id=action_id,
+            )
+        return await self.execute_read(name, arguments, user_id=user_id)
 
     @staticmethod
     def _business_failure(exc: Exception) -> dict[str, Any] | None:

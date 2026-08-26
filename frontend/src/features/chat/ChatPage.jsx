@@ -26,6 +26,7 @@ export function ChatPage() {
   const dispatch = useDispatch();
   const chat = useSelector((state) => state.chat);
   const controllerRef = useRef(null);
+  const decisionKeysRef = useRef(new Map());
 
   const loadConversations = useCallback(async () => {
     try {
@@ -102,6 +103,14 @@ export function ChatPage() {
 
   const decide = async (decision) => {
     if (!chat.pendingConfirmation || !chat.currentId) return;
+    const commandId =
+      chat.pendingConfirmation.command_id ||
+      chat.pendingConfirmation.interrupt_id;
+    let idempotencyKey = decisionKeysRef.current.get(commandId);
+    if (!idempotencyKey) {
+      idempotencyKey = crypto.randomUUID();
+      decisionKeysRef.current.set(commandId, idempotencyKey);
+    }
     const controller = new AbortController();
     controllerRef.current = controller;
     dispatch(startResume());
@@ -115,6 +124,7 @@ export function ChatPage() {
         },
         {
           signal: controller.signal,
+          idempotencyKey,
           onEvent(event) {
             if (event.type === 'token') dispatch(appendDelta(event.delta));
             if (event.type === 'status') dispatch(setStatus(event.label));
@@ -126,6 +136,7 @@ export function ChatPage() {
           },
         },
       );
+      if (completed) decisionKeysRef.current.delete(commandId);
       if (!completed) dispatch(failStream('确认连接意外结束，请重试'));
       await loadConversations();
     } catch (error) {

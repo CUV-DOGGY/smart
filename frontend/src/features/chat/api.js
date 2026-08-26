@@ -22,11 +22,22 @@ export async function streamChat(payload, { signal, onEvent }) {
   return streamEndpoint('/chat/stream', payload, { signal, onEvent });
 }
 
-export async function resumeChat(payload, { signal, onEvent }) {
-  return streamEndpoint('/chat/resume', payload, { signal, onEvent });
+export async function resumeChat(
+  payload,
+  { signal, onEvent, idempotencyKey },
+) {
+  return streamEndpoint('/chat/resume', payload, {
+    signal,
+    onEvent,
+    extraHeaders: { 'Idempotency-Key': idempotencyKey },
+  });
 }
 
-async function streamEndpoint(path, payload, { signal, onEvent }) {
+async function streamEndpoint(
+  path,
+  payload,
+  { signal, onEvent, extraHeaders = {} },
+) {
   let response;
   try {
     response = await fetch(`${env.apiBaseUrl}${path}`, {
@@ -35,6 +46,7 @@ async function streamEndpoint(path, payload, { signal, onEvent }) {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${tokenStorage.get() || ''}`,
+        ...extraHeaders,
       },
       body: JSON.stringify(payload),
     });

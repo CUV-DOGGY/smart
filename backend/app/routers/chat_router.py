@@ -3,7 +3,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.agents.runner import (
@@ -48,6 +48,8 @@ async def stream_chat(
         user_id=user_id,
         llm=service.runtime_context.llm,
         tools=service.runtime_context.tools,
+        command_service=service.runtime_context.command_service,
+        conversation_id=conversation_id,
     )
     lock_context = service.run_lock.acquire(user_id, conversation_id)
     try:
@@ -84,11 +86,22 @@ async def resume_chat(
     request: Request,
     user_id: Annotated[str, Depends(get_current_user_id)],
     service: Annotated[AgentChatService, Depends(get_agent_chat_service)],
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=8,
+            max_length=128,
+            pattern=r"^[A-Za-z0-9._:-]+$",
+        ),
+    ],
 ) -> StreamingResponse:
     service.runtime_context = AgentRuntimeContext(
         user_id=user_id,
         llm=service.runtime_context.llm,
         tools=service.runtime_context.tools,
+        command_service=service.runtime_context.command_service,
+        conversation_id=payload.conversation_id,
     )
     await _ensure_resume(service, payload, user_id)
     lock_context = service.run_lock.acquire(user_id, payload.conversation_id)
@@ -109,6 +122,7 @@ async def resume_chat(
             conversation_id=payload.conversation_id,
             interrupt_id=payload.interrupt_id,
             decision=payload.decision,
+            idempotency_key=idempotency_key,
             is_disconnected=request.is_disconnected,
         ),
         lock_context,

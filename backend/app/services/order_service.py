@@ -132,6 +132,7 @@ class OrderService:
         user_id: str,
         *,
         idempotency_key: str,
+        session=None,
     ):
         requested_quantities = self._requested_quantities(order)
 
@@ -139,10 +140,17 @@ class OrderService:
             order=order,
             requested_quantities=requested_quantities,
         )
-        existing_order = await self.repository.find_by_idempotency_key(
-            user_id=user_id,
-            idempotency_key=idempotency_key,
-        )
+        if session is None:
+            existing_order = await self.repository.find_by_idempotency_key(
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+            )
+        else:
+            existing_order = await self.repository.find_by_idempotency_key(
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+                session=session,
+            )
         if existing_order is not None:
             return self._response_from_idempotent_order(
                 existing_order,
@@ -204,14 +212,29 @@ class OrderService:
             )
 
         try:
-            return await self.repository.run_in_transaction(create_in_transaction)
+            if session is None:
+                return await self.repository.run_in_transaction(create_in_transaction)
+            return await create_in_transaction(session)
         except OrderUniquenessConflictError as exc:
+            if session is not None:
+                # The outer write-command transaction must abort before any
+                # duplicate-key recovery query. Continuing inside an aborted
+                # MongoDB transaction could otherwise commit an invalid
+                # command outcome.
+                raise
             # 两个相同幂等键可能同时通过事务外的快速查询。数据库唯一
             # 索引决定唯一赢家；失败方读取赢家已经提交的订单并复用结果。
-            existing_order = await self.repository.find_by_idempotency_key(
-                user_id=user_id,
-                idempotency_key=idempotency_key,
-            )
+            if session is None:
+                existing_order = await self.repository.find_by_idempotency_key(
+                    user_id=user_id,
+                    idempotency_key=idempotency_key,
+                )
+            else:
+                existing_order = await self.repository.find_by_idempotency_key(
+                    user_id=user_id,
+                    idempotency_key=idempotency_key,
+                    session=session,
+                )
             if existing_order is None:
                 raise RuntimeError(
                     "Order uniqueness conflict could not be resolved"
@@ -526,8 +549,17 @@ class OrderService:
         self,
         order_id: str,
         user_id: str,
+        *,
+        session=None,
     ) -> OrderCancelResponse:
-        result = await self.repository.query_order_status(order_id, user_id)
+        if session is None:
+            result = await self.repository.query_order_status(order_id, user_id)
+        else:
+            result = await self.repository.query_order_status(
+                order_id,
+                user_id,
+                session=session,
+            )
         if result is None:
             raise OrderNotFoundError(
                 "Order not found or not accessible"
@@ -538,17 +570,33 @@ class OrderService:
                 "Current order status cannot be canceled",
                 current_status=current_status,
             )
-        success = await self.repository.cancel_order(
-            order_id,
-            user_id,
-            expected_status=current_status.value,
-            target_status=OrderStatus.CANCELING.value,
-        )
-        if not success:
-            latest_document = await self.repository.query_order_status(
+        if session is None:
+            success = await self.repository.cancel_order(
                 order_id,
                 user_id,
+                expected_status=current_status.value,
+                target_status=OrderStatus.CANCELING.value,
             )
+        else:
+            success = await self.repository.cancel_order(
+                order_id,
+                user_id,
+                expected_status=current_status.value,
+                target_status=OrderStatus.CANCELING.value,
+                session=session,
+            )
+        if not success:
+            if session is None:
+                latest_document = await self.repository.query_order_status(
+                    order_id,
+                    user_id,
+                )
+            else:
+                latest_document = await self.repository.query_order_status(
+                    order_id,
+                    user_id,
+                    session=session,
+                )
             if latest_document is None:
                 raise OrderNotFoundError(
                     "Order no longer exists or is not accessible"

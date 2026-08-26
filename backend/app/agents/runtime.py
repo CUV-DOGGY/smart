@@ -9,3 +9,5 @@ class AgentRuntimeContext:
     user_id: str
     llm: Any
     tools: ServiceToolRegistry
+    command_service: Any = None
+    conversation_id: str = ""

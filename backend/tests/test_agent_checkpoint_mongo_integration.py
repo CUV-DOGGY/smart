@@ -8,6 +8,7 @@ from pymongo import MongoClient
 from app.agents.graph import build_service_agent
 from app.agents.runner import AgentConfirmationStaleError, AgentRunner
 from app.agents.runtime import AgentRuntimeContext
+from tests.test_agent_graph import FakeCommandService
 
 
 RUN_INTEGRATION = os.getenv("RUN_MONGO_INTEGRATION") == "1"
@@ -61,6 +62,7 @@ class AgentCheckpointMongoIntegrationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_confirmation_survives_graph_rebuild_and_can_be_rejected(self):
         registry = FakeRegistry()
+        command_service = FakeCommandService(registry)
         initial_context = AgentRuntimeContext(
             "checkpoint-user",
             FakeModel([
@@ -75,6 +77,8 @@ class AgentCheckpointMongoIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 )
             ]),
             registry,
+            command_service,
+            "checkpoint-conversation",
         )
         runner = AgentRunner(build_service_agent(self.saver), self.saver)
         first_events = [
@@ -105,8 +109,19 @@ class AgentCheckpointMongoIntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         resume_context = AgentRuntimeContext(
             "checkpoint-user",
-            FakeModel([]),
+            FakeModel([AIMessage(content="已取消，本次操作没有执行。")]),
             registry,
+            command_service,
+            "checkpoint-conversation",
+        )
+        command_service.finish(
+            confirmation["command_id"],
+            status="rejected",
+            result={
+                "ok": False,
+                "code": "USER_REJECTED",
+                "message": "用户取消了本次操作",
+            },
         )
         resumed_events = [
             event

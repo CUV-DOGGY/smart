@@ -167,6 +167,8 @@ class AddressService:
         self,
         address_id: str,
         user_id: str,
+        *,
+        session=None,
     ) -> UserAddressResponse:
         current_time = self._current_time()
 
@@ -207,7 +209,12 @@ class AddressService:
                 raise AddressNotFoundError("Address not found")
             return result
 
-        address = await self.repository.run_in_transaction(set_default_in_transaction)
+        if session is None:
+            address = await self.repository.run_in_transaction(
+                set_default_in_transaction
+            )
+        else:
+            address = await set_default_in_transaction(session)
         return UserAddressResponse(
             status="success",
             message="Default address updated successfully",
@@ -218,6 +225,8 @@ class AddressService:
         self,
         address_id: str,
         user_id: str,
+        *,
+        session=None,
     ) -> UserAddressActionResponse:
         current_time = self._current_time()
 
@@ -248,7 +257,10 @@ class AddressService:
                         session=session,
                     )
 
-        await self.repository.run_in_transaction(delete_in_transaction)
+        if session is None:
+            await self.repository.run_in_transaction(delete_in_transaction)
+        else:
+            await delete_in_transaction(session)
         return UserAddressActionResponse(
             status="success",
             message="Address deleted successfully",

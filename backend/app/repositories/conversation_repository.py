@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from app.core.database_errors import (
     DatabaseUnavailableError,
@@ -33,6 +34,11 @@ class ConversationRepository:
                 [("conversation_id", 1), ("sequence", 1)],
                 unique=True,
                 name="uq_conversation_message_sequence",
+            )
+            await self.messages.create_index(
+                [("message_id", 1)],
+                unique=True,
+                name="uq_conversation_message_id",
             )
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(
@@ -83,9 +89,23 @@ class ConversationRepository:
         user_id: str,
         role: str,
         content: str,
+        message_id: str | None = None,
     ) -> str | None:
         now = datetime.now(timezone.utc)
         try:
+            if message_id is not None:
+                existing = await self.messages.find_one(
+                    {
+                        "message_id": message_id,
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "role": role,
+                        "content": content,
+                    },
+                    {"_id": 1},
+                )
+                if existing is not None:
+                    return message_id
             conversation = await self.conversations.find_one_and_update(
                 {
                     "conversation_id": conversation_id,
@@ -101,7 +121,7 @@ class ConversationRepository:
             )
             if conversation is None:
                 return None
-            message_id = str(uuid.uuid4())
+            message_id = message_id or str(uuid.uuid4())
             await self.messages.insert_one(
                 {
                     "message_id": message_id,
@@ -113,6 +133,20 @@ class ConversationRepository:
                     "created_at": now,
                 }
             )
+        except DuplicateKeyError:
+            existing = await self.messages.find_one(
+                {
+                    "message_id": message_id,
+                    "conversation_id": conversation_id,
+                    "user_id": user_id,
+                    "role": role,
+                    "content": content,
+                },
+                {"_id": 1},
+            )
+            if existing is None:
+                raise
+            return message_id
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(
                 "MongoDB message persistence is temporarily unavailable"

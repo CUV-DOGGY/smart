@@ -64,6 +64,7 @@ async def lifespan(app: FastAPI):
     mongo_client = None
     redis_client = None
     checkpointer = None
+    write_command_worker = None
 
     try:
         # 1. 连接 MongoDB
@@ -80,12 +81,14 @@ async def lifespan(app: FastAPI):
         from app.repositories.conversation_repository import ConversationRepository
         from app.repositories.product_repository import ProductRepository
         from app.repositories.shop_repository import ShopRepository
+        from app.repositories.write_command_repository import WriteCommandRepository
         await AuthRepository(db).ensure_indexes()
         await AddressRepository(db).ensure_indexes()
         await OrderRepository(db).ensure_indexes()
         await ConversationRepository(db).ensure_indexes()
         await ShopRepository(db).ensure_indexes()
         await ProductRepository(db).ensure_indexes()
+        await WriteCommandRepository(db).ensure_indexes()
         logger.info("数据库索引初始化成功")
 
         # 2. 连接 Redis。限流依赖 Redis，连接失败时拒绝启动。
@@ -122,6 +125,46 @@ async def lifespan(app: FastAPI):
         )
         logger.info("LangGraph Agent 初始化成功")
 
+        # 6. 正常确认在请求内执行；恢复 Worker 只接管超时租约或遗留任务。
+        from app.integrations.write_command_worker import WriteCommandWorker
+        from app.services.address_service import AddressService
+        from app.services.catalog_service import CatalogService
+        from app.services.delivery_location_service import DeliveryLocationService
+        from app.services.order_service import OrderService
+        from app.services.write_command_executor import WriteCommandExecutor
+        from app.tools.service_tools import ServiceToolRegistry
+
+        delivery_service = DeliveryLocationService()
+        worker_tools = ServiceToolRegistry(
+            catalog_service=CatalogService(
+                ShopRepository(db),
+                ProductRepository(db),
+            ),
+            address_service=AddressService(
+                AddressRepository(db),
+                delivery_service,
+            ),
+            order_service=OrderService(
+                OrderRepository(db),
+                ProductRepository(db),
+                ShopRepository(db),
+                AddressRepository(db),
+                delivery_service,
+            ),
+        )
+        command_repository = WriteCommandRepository(db)
+        write_command_worker = WriteCommandWorker(
+            command_repository,
+            WriteCommandExecutor(
+                command_repository,
+                worker_tools,
+                lease_seconds=settings.WRITE_COMMAND_EXECUTION_LEASE_SECONDS,
+            ),
+        )
+        write_command_worker.start()
+        app.state.write_command_worker = write_command_worker
+        logger.info("写命令恢复 Worker 初始化成功")
+
         logger.info("应用启动完成")
         logger.info("=" * 30)
         yield
@@ -130,6 +173,11 @@ async def lifespan(app: FastAPI):
         logger.info("应用关闭中...")
 
         # 按初始化的相反顺序释放资源，一个资源失败不阻断其他资源清理。
+        try:
+            if write_command_worker is not None:
+                await write_command_worker.stop()
+        except Exception:
+            logger.exception("写命令恢复 Worker 关闭失败")
         try:
             await shutdown_redis(redis_client)
         except Exception:

@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timedelta, timezone
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
@@ -54,11 +55,80 @@ class FakeRegistry:
         self.calls.append((name, arguments, user_id, action_id))
         return {"ok": True, "result": "done"}
 
+    async def execute_read(self, name, arguments, *, user_id):
+        return await self.execute(
+            name,
+            arguments,
+            user_id=user_id,
+            action_id="read-only",
+        )
+
 
 class FailingRegistry(FakeRegistry):
     async def execute(self, name, arguments, *, user_id, action_id):
         self.calls.append((name, arguments, user_id, action_id))
         raise RuntimeError("database document validation failed")
+
+    async def execute_read(self, name, arguments, *, user_id):
+        return await self.execute(
+            name,
+            arguments,
+            user_id=user_id,
+            action_id="read-only",
+        )
+
+
+class FakeCommandService:
+    def __init__(self, registry):
+        self.registry = registry
+        self.commands = {}
+
+    async def prepare(
+        self,
+        *,
+        command_id,
+        user_id,
+        conversation_id,
+        action,
+        arguments,
+    ):
+        confirmation = await self.registry.prepare_confirmation(
+            action,
+            arguments,
+            user_id=user_id,
+        )
+        command = {
+            "command_id": command_id,
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "action": action,
+            "arguments": arguments,
+            "request_hash": f"hash:{command_id}",
+            "status": "awaiting_confirmation",
+            "version": 1,
+            "summary": confirmation["summary"],
+            "presentation": confirmation.get("presentation"),
+            "expires_at": datetime.now(timezone.utc) + timedelta(minutes=15),
+            "result": None,
+        }
+        self.commands[command_id] = command
+        return command
+
+    async def get_owned(self, *, command_id, user_id):
+        command = self.commands[command_id]
+        if command["user_id"] != user_id:
+            raise RuntimeError("not owned")
+        return command
+
+    @staticmethod
+    def result_for_agent(command):
+        if not command.get("result"):
+            raise RuntimeError("not terminal")
+        return command["result"]
+
+    def finish(self, command_id, *, status, result):
+        self.commands[command_id]["status"] = status
+        self.commands[command_id]["result"] = result
 
 
 def tool_call(name, args, call_id="call-1"):
@@ -73,12 +143,19 @@ class AgentGraphTests(unittest.IsolatedAsyncioTestCase):
         checkpointer = InMemorySaver()
         graph = build_service_agent(checkpointer)
         registry = FakeRegistry()
-        context = AgentRuntimeContext("user-001", FakeModel(responses), registry)
+        command_service = FakeCommandService(registry)
+        context = AgentRuntimeContext(
+            "user-001",
+            FakeModel(responses),
+            registry,
+            command_service,
+            "conversation-001",
+        )
         config = {"configurable": {"thread_id": "user-001:conversation-001"}}
-        return graph, registry, context, config
+        return graph, registry, command_service, context, config
 
     async def test_read_tool_executes_without_confirmation(self):
-        graph, registry, context, config = self.make(
+        graph, registry, _, context, config = self.make(
             [tool_call("list_orders", {}), AIMessage(content="你目前没有订单。")]
         )
         result = await graph.ainvoke(
@@ -91,7 +168,7 @@ class AgentGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["messages"][-1].content, "你目前没有订单。")
 
     async def test_missing_slot_is_collected_on_next_turn(self):
-        graph, registry, context, config = self.make(
+        graph, registry, _, context, config = self.make(
             [
                 tool_call("get_order", {}),
                 tool_call("get_order", {"order_id": "order-001"}, "call-2"),
@@ -109,7 +186,7 @@ class AgentGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second["messages"][-1].content, "订单正在处理中。")
 
     async def test_write_waits_for_approval_and_executes_once(self):
-        graph, registry, context, config = self.make(
+        graph, registry, commands, context, config = self.make(
             [tool_call("cancel_order", {"order_id": "order-001"}), AIMessage(content="已提交取消申请。")]
         )
         await graph.ainvoke(
@@ -118,16 +195,21 @@ class AgentGraphTests(unittest.IsolatedAsyncioTestCase):
         snapshot = await graph.aget_state(config)
         self.assertEqual(registry.calls, [])
         payload = snapshot.tasks[0].interrupts[0].value
+        commands.finish(
+            payload["command_id"],
+            status="succeeded",
+            result={"ok": True, "order_status": "canceling"},
+        )
         result = await graph.ainvoke(
             Command(resume={"interrupt_id": payload["interrupt_id"], "decision": "approve"}),
             config=config,
             context=context,
         )
-        self.assertEqual(len(registry.calls), 1)
+        self.assertEqual(registry.calls, [])
         self.assertEqual(result["messages"][-1].content, "已提交取消申请。")
 
     async def test_create_order_interrupt_contains_structured_preview(self):
-        graph, registry, context, config = self.make([
+        graph, registry, _, context, config = self.make([
             tool_call(
                 "create_order",
                 {
@@ -152,14 +234,26 @@ class AgentGraphTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(registry.confirmation_calls[0][2], "user-001")
 
     async def test_reject_never_calls_write_service(self):
-        graph, registry, context, config = self.make(
-            [tool_call("delete_address", {"address_id": "address-001"})]
+        graph, registry, commands, context, config = self.make(
+            [
+                tool_call("delete_address", {"address_id": "address-001"}),
+                AIMessage(content="已取消，本次操作没有执行。"),
+            ]
         )
         await graph.ainvoke(
             {"messages": [HumanMessage(content="删除地址")]}, config=config, context=context
         )
         snapshot = await graph.aget_state(config)
         payload = snapshot.tasks[0].interrupts[0].value
+        commands.finish(
+            payload["command_id"],
+            status="rejected",
+            result={
+                "ok": False,
+                "code": "USER_REJECTED",
+                "message": "用户取消了本次操作",
+            },
+        )
         result = await graph.ainvoke(
             Command(resume={"interrupt_id": payload["interrupt_id"], "decision": "reject"}),
             config=config,
@@ -178,7 +272,13 @@ class AgentGraphTests(unittest.IsolatedAsyncioTestCase):
                 AIMessage(content="商品服务暂时不可用，请稍后重试。"),
             ]
         )
-        context = AgentRuntimeContext("user-001", model, registry)
+        context = AgentRuntimeContext(
+            "user-001",
+            model,
+            registry,
+            FakeCommandService(registry),
+            "tool-failure",
+        )
         config = {"configurable": {"thread_id": "user-001:tool-failure"}}
 
         result = await graph.ainvoke(

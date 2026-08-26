@@ -41,7 +41,7 @@ backend/app
 └─ core/                 生命周期、中间件、错误和安全
 ```
 
-业务域不直接访问其他域的内部状态。Router 和 Service 均不导入具体 Repository；装配集中在 `dependencies/services.py`。Agent 工具只能调用 Service，`user_id` 通过 Runtime Context 注入，不进入模型参数或持久化 State。详细流程见 [Agent 工作流](docs/agent-workflow.md)。
+业务域不直接访问其他域的内部状态。Router 和 Service 均不导入具体 Repository；装配集中在 `dependencies/services.py`。LangGraph 只直接执行只读工具；写操作先形成持久化命令，经 `interrupt` 确认后由图外执行器完成，再把终态结果作为 ToolMessage 交给模型。详细边界见 [Agent 工作流](docs/agent-workflow.md)。
 
 ## 技术与版本
 
@@ -147,7 +147,7 @@ Redis 容器为 `smartserve-redis`，只绑定 `127.0.0.1:6380`；6379 保留给
 
 流事件为 `meta`、`status`、`token`、`confirmation_required`、`done` 或 `error`。`done.outcome` 为 `completed` 或 `awaiting_confirmation`。客户端不提交 UID，所有权只由 Bearer Token 决定。
 
-只读工具直接执行；创建订单、取消订单、设置默认地址和删除地址会返回确认卡。`/chat/resume` 只接受原 `interrupt_id` 加 `approve|reject`，自然语言“确认”不能执行写操作，确认时也不能替换服务端冻结的参数。
+只读工具直接执行；创建订单、取消订单、设置默认地址和删除地址会创建 `write_commands` 记录并返回确认卡。`/chat/resume` 接受原 `interrupt_id` 与 `approve|reject`，同时要求复用 `Idempotency-Key` 请求头。自然语言“确认”不能执行写操作，确认时也不能替换服务端冻结的参数。业务修改和命令终态在同一 MongoDB 事务中提交。
 
 ### 地址、目录与订单
 

@@ -1,6 +1,7 @@
 import unittest
 
 from app.schemas.order import OrderConfirmationPreview
+from app.services.address_service import AddressNotFoundError
 from app.tools.service_tools import ServiceToolRegistry
 
 
@@ -55,6 +56,34 @@ class ServiceToolConfirmationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("user_id", result["presentation"])
         self.assertEqual(result["presentation"]["total_price"], 30.0)
         self.assertEqual(order_service.calls[0][1], "user-001")
+
+    async def test_transactional_write_failure_escapes_for_full_rollback(self):
+        class FailingAddressService:
+            async def delete_address(self, address_id, user_id, *, session=None):
+                raise AddressNotFoundError("missing")
+
+        registry = ServiceToolRegistry(
+            catalog_service=object(),
+            address_service=FailingAddressService(),
+            order_service=object(),
+        )
+
+        with self.assertRaises(AddressNotFoundError):
+            await registry.execute_write(
+                "delete_address",
+                {"address_id": "address-001"},
+                user_id="user-001",
+                command_id="command-001",
+                session=object(),
+            )
+
+        mapped = await registry.execute_write(
+            "delete_address",
+            {"address_id": "address-001"},
+            user_id="user-001",
+            command_id="command-001",
+        )
+        self.assertEqual(mapped["code"], "ADDRESS_NOT_FOUND")
 
 
 if __name__ == "__main__":

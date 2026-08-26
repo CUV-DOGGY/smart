@@ -141,8 +141,10 @@ class AgentRunner:
                     emitted += text
                     yield {"type": "token", "delta": text}
             elif part_type == "updates" and isinstance(data, dict):
-                if "execute_tool" in data:
+                if "execute_read_tool" in data:
                     yield {"type": "status", "phase": "using_tool", "label": "正在调用业务服务"}
+                elif "append_write_result" in data:
+                    yield {"type": "status", "phase": "reading_result", "label": "正在整理执行结果"}
 
         pending = await self._pending_from_config(config)
         if pending:

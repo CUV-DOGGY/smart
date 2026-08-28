@@ -9,6 +9,53 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
+    # Observability is opt-in until the telemetry pipeline is configured.
+    OBSERVABILITY_ENABLED: bool = False
+    OTEL_SERVICE_NAME: str = Field(
+        default="smartserve-backend",
+        min_length=1,
+        max_length=255,
+    )
+    OTEL_EXPORTER_OTLP_ENDPOINT: str = "http://127.0.0.1:4318"
+    OTEL_ENVIRONMENT: str = Field(
+        default="development",
+        min_length=1,
+        max_length=64,
+    )
+    OTEL_TRACE_SAMPLE_RATIO: float = Field(default=1.0, ge=0.0, le=1.0)
+    OTEL_METRIC_EXPORT_INTERVAL: int = Field(
+        default=10_000,
+        ge=1_000,
+        le=300_000,
+    )
+    BROWSER_TELEMETRY_ENABLED: bool = False
+    BROWSER_TELEMETRY_ALLOWED_ORIGINS: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+    )
+    BROWSER_TELEMETRY_RATE_LIMIT_BY_USER: int = Field(
+        default=60,
+        ge=1,
+        le=10_000,
+    )
+    BROWSER_TELEMETRY_RATE_LIMIT_WINDOW_SECONDS: int = Field(
+        default=60,
+        ge=1,
+        le=3_600,
+    )
+    BROWSER_TELEMETRY_MAX_REQUEST_BODY_BYTES: int = Field(
+        default=1_048_576,
+        ge=1_024,
+        le=10_485_760,
+    )
+    BROWSER_TELEMETRY_FORWARD_TIMEOUT_SECONDS: float = Field(
+        default=5.0,
+        gt=0,
+        le=30,
+    )
+
     # LLM 配置
     MODEL_NAME: str
     DEEPSEEK_API_KEY: str

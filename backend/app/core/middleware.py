@@ -7,9 +7,23 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from app.config import settings
+from app.observability.context import (
+    bind_request_id,
+    reset_request_id,
+    set_current_span_request_id,
+)
 
 
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+CORS_ALLOWED_HEADERS = [
+    "Authorization",
+    "Content-Type",
+    "Idempotency-Key",
+    "X-Request-ID",
+    "traceparent",
+    "tracestate",
+    "baggage",
+]
 
 
 class RequestIdMiddleware:
@@ -37,6 +51,8 @@ class RequestIdMiddleware:
             else str(uuid.uuid4())
         )
         scope.setdefault("state", {})["request_id"] = request_id
+        request_id_token = bind_request_id(request_id)
+        set_current_span_request_id(request_id)
 
         async def send_with_request_id(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -47,7 +63,10 @@ class RequestIdMiddleware:
                 message["headers"] = response_headers
             await send(message)
 
-        await self.app(scope, receive, send_with_request_id)
+        try:
+            await self.app(scope, receive, send_with_request_id)
+        finally:
+            reset_request_id(request_id_token)
 
 
 class AuthRequestBodyLimitMiddleware:
@@ -133,5 +152,6 @@ def setup_middleware(app: FastAPI) -> None:
         allow_origins=settings.CORS_ALLOWED_ORIGINS,
         allow_credentials="*" not in settings.CORS_ALLOWED_ORIGINS,
         allow_methods=["*"],
-        allow_headers=["*"],
+        allow_headers=CORS_ALLOWED_HEADERS,
+        expose_headers=["X-Request-ID", "Retry-After"],
     )

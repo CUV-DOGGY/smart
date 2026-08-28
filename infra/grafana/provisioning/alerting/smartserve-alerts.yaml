@@ -1,0 +1,379 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: smartserve-slo
+    folder: SmartServe Alerts
+    interval: 30s
+    rules:
+      - uid: smartserve_api_error_rate
+        title: API 5 分钟错误率超过 5%
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                100 * sum(rate(http_server_duration_milliseconds_count{job="smartserve-backend",http_status_code=~"5.."}[5m])) / clamp_min(sum(rate(http_server_duration_milliseconds_count{job="smartserve-backend"}[5m])), 1e-9)
+              instant: true
+              intervalMs: 15000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params: [5]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        dashboardUid: smartserve-overview
+        panelId: 2
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: API 5 分钟 5xx 错误率超过 5%
+          description: 检查近期发布、下游依赖和错误 Trace。
+        labels:
+          service: smartserve
+          severity: critical
+          team: backend
+        isPaused: false
+
+      - uid: smartserve_agent_timeout_rate
+        title: Agent 超时率超过 2%
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                100 * sum(rate(smartserve_agent_run_count_total{job="smartserve-backend",outcome="timeout"}[5m])) / clamp_min(sum(rate(smartserve_agent_run_count_total{job="smartserve-backend"}[5m])), 1e-9)
+              instant: true
+              intervalMs: 15000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params: [2]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        dashboardUid: smartserve-overview
+        panelId: 5
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: Agent 5 分钟超时率超过 2%
+          description: 检查模型延迟、工具耗时和 AGENT_RUN_TIMEOUT_SECONDS。
+        labels:
+          service: smartserve
+          severity: warning
+          team: agent
+        isPaused: false
+
+      - uid: smartserve_agent_p95
+        title: Agent P95 超过 30 秒
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                histogram_quantile(0.95, sum by (le) (rate(smartserve_agent_run_duration_seconds_bucket{job="smartserve-backend"}[5m])))
+              instant: true
+              intervalMs: 15000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params: [30]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        dashboardUid: smartserve-overview
+        panelId: 6
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: Agent 5 分钟 P95 超过 30 秒
+          description: 对照 LLM 和 Tool P95 定位慢阶段。
+        labels:
+          service: smartserve
+          severity: warning
+          team: agent
+        isPaused: false
+
+      - uid: smartserve_tool_failure_rate
+        title: Tool 失败率超过 5%
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 600
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                100 * sum(rate(smartserve_agent_tool_call_count_total{job="smartserve-backend",outcome="failed"}[5m])) / clamp_min(sum(rate(smartserve_agent_tool_call_count_total{job="smartserve-backend"}[5m])), 1e-9)
+              instant: true
+              intervalMs: 15000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params: [5]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        dashboardUid: smartserve-overview
+        panelId: 13
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: Tool 5 分钟失败率超过 5%
+          description: 按 tool_name 检查看板并查看关联错误 Trace。
+        labels:
+          service: smartserve
+          severity: warning
+          team: agent
+        isPaused: false
+
+      - uid: smartserve_write_command_overdue
+        title: 写命令执行状态超过租约时间
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                sum(smartserve_write_command_overdue{job="smartserve-backend"})
+              instant: true
+              intervalMs: 15000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params: [0]
+                    type: gt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        dashboardUid: smartserve-overview
+        panelId: 18
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 2m
+        annotations:
+          summary: 存在超过 execution lease 的写命令
+          description: 检查恢复 Worker、MongoDB 可用性和 write_command.recovery Trace。
+        labels:
+          service: smartserve
+          severity: critical
+          team: backend
+        isPaused: false
+
+      - uid: smartserve_readiness_failure
+        title: MongoDB 或 Redis readiness 失败
+        condition: B
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange:
+              from: 300
+              to: 0
+            model:
+              datasource:
+                type: prometheus
+                uid: prometheus
+              editorMode: code
+              expr: >-
+                min({__name__=~"smartserve_readiness_(mongodb|redis)",job="smartserve-backend"})
+              instant: true
+              intervalMs: 15000
+              legendFormat: __auto
+              maxDataPoints: 43200
+              range: false
+              refId: A
+          - refId: B
+            datasourceUid: __expr__
+            relativeTimeRange:
+              from: 0
+              to: 0
+            model:
+              conditions:
+                - evaluator:
+                    params: [1]
+                    type: lt
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    params: []
+                    type: last
+                  type: query
+              datasource:
+                type: __expr__
+                uid: __expr__
+              expression: A
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: B
+              type: classic_conditions
+        dashboardUid: smartserve-overview
+        panelId: 27
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          summary: MongoDB 或 Redis readiness 不可用
+          description: 检查 /health/ready、数据库连接和 Redis 连接。
+        labels:
+          service: smartserve
+          severity: critical
+          team: backend
+        isPaused: false

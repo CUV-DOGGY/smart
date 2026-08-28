@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.config import settings
+from app.observability import shutdown_observability
 
 logger = logging.getLogger(__name__)
 
@@ -194,3 +195,4 @@ async def lifespan(app: FastAPI):
 
         logger.info("应用已关闭")
         logger.info("=" * 30)
+        shutdown_observability(app)

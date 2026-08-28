@@ -1,0 +1,437 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": [],
+      "title": "API 与流式连接",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "id": 1,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(http_server_duration_milliseconds_count{job=\"smartserve-backend\",deployment_environment_name=~\"$environment\",http_target!~\"/health/(live|ready)\"}[$__rate_interval]))",
+          "legendFormat": "requests/s",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "API 请求量",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 5 }] }, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "id": 2,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "100 * sum(rate(http_server_duration_milliseconds_count{job=\"smartserve-backend\",deployment_environment_name=~\"$environment\",http_status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_duration_milliseconds_count{job=\"smartserve-backend\",deployment_environment_name=~\"$environment\"}[5m])), 1e-9)",
+          "legendFormat": "5xx error rate",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "API 5 分钟错误率",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "ms" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 8, "x": 12, "y": 1 },
+      "id": 3,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_duration_milliseconds_bucket{job=\"smartserve-backend\",deployment_environment_name=~\"$environment\"}[$__rate_interval])))", "legendFormat": "P50", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_duration_milliseconds_bucket{job=\"smartserve-backend\",deployment_environment_name=~\"$environment\"}[$__rate_interval])))", "legendFormat": "P95", "range": true, "refId": "B" },
+        { "editorMode": "code", "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_duration_milliseconds_bucket{job=\"smartserve-backend\",deployment_environment_name=~\"$environment\"}[$__rate_interval])))", "legendFormat": "P99", "range": true, "refId": "C" }
+      ],
+      "title": "API 延迟 P50 / P95 / P99",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 20 }, { "color": "red", "value": 100 }] }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "editorMode": "code", "expr": "sum(smartserve_sse_connections{job=\"smartserve-backend\",deployment_environment_name=~\"$environment\"}) or vector(0)", "legendFormat": "active", "range": true, "refId": "A" }
+      ],
+      "title": "当前 SSE 连接数",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 101,
+      "panels": [],
+      "title": "Agent 与 LLM",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 6 },
+      "id": 5,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "100 * sum(rate(smartserve_agent_run_count_total{job=\"smartserve-backend\",outcome=~\"completed|awaiting_confirmation\"}[5m])) / clamp_min(sum(rate(smartserve_agent_run_count_total{job=\"smartserve-backend\"}[5m])), 1e-9)", "legendFormat": "成功", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "100 * sum(rate(smartserve_agent_run_count_total{job=\"smartserve-backend\",outcome=\"timeout\"}[5m])) / clamp_min(sum(rate(smartserve_agent_run_count_total{job=\"smartserve-backend\"}[5m])), 1e-9)", "legendFormat": "超时", "range": true, "refId": "B" },
+        { "editorMode": "code", "expr": "100 * sum(rate(smartserve_agent_run_count_total{job=\"smartserve-backend\",outcome=\"disconnected\"}[5m])) / clamp_min(sum(rate(smartserve_agent_run_count_total{job=\"smartserve-backend\"}[5m])), 1e-9)", "legendFormat": "断连", "range": true, "refId": "C" }
+      ],
+      "title": "Agent 成功 / 超时 / 断连比例",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 30 }] }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 6 },
+      "id": 6,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le) (rate(smartserve_agent_run_duration_seconds_bucket{job=\"smartserve-backend\"}[5m])))", "legendFormat": "P95", "range": true, "refId": "A" }
+      ],
+      "title": "Agent P95",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 6 },
+      "id": 7,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.50, sum by (le) (rate(smartserve_agent_first_token_duration_seconds_bucket{job=\"smartserve-backend\"}[$__rate_interval])))", "legendFormat": "P50", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le) (rate(smartserve_agent_first_token_duration_seconds_bucket{job=\"smartserve-backend\"}[$__rate_interval])))", "legendFormat": "P95", "range": true, "refId": "B" }
+      ],
+      "title": "首 Token P50 / P95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "cps" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 6 },
+      "id": 8,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (model, outcome) (rate(smartserve_llm_call_count_total{job=\"smartserve-backend\"}[$__rate_interval]))", "legendFormat": "{{model}} {{outcome}}", "range": true, "refId": "A" }
+      ],
+      "title": "LLM 调用量",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 10 },
+      "id": 9,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.50, sum by (le, model) (rate(smartserve_llm_call_duration_seconds_bucket{job=\"smartserve-backend\"}[$__rate_interval])))", "legendFormat": "{{model}} P50", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le, model) (rate(smartserve_llm_call_duration_seconds_bucket{job=\"smartserve-backend\"}[$__rate_interval])))", "legendFormat": "{{model}} P95", "range": true, "refId": "B" }
+      ],
+      "title": "LLM 耗时",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 10 },
+      "id": 10,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (model, action) (rate(smartserve_llm_token_count_total{job=\"smartserve-backend\"}[$__rate_interval]))", "legendFormat": "{{model}} {{action}} tokens/s", "range": true, "refId": "A" }
+      ],
+      "title": "LLM Token",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "失败次数 / 总调用次数，按模型聚合。",
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 10 },
+      "id": 11,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "100 * sum by (model) (rate(smartserve_llm_call_count_total{job=\"smartserve-backend\",outcome=\"failed\"}[5m])) / clamp_min(sum by (model) (rate(smartserve_llm_call_count_total{job=\"smartserve-backend\"}[5m])), 1e-9)", "legendFormat": "{{model}}", "range": true, "refId": "A" }
+      ],
+      "title": "DeepSeek 错误率",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "id": 102,
+      "panels": [],
+      "title": "Tool 与写命令",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "cps" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 15 },
+      "id": 12,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (tool_name, outcome) (rate(smartserve_agent_tool_call_count_total{job=\"smartserve-backend\"}[$__rate_interval]))", "legendFormat": "{{tool_name}} {{outcome}}", "range": true, "refId": "A" }
+      ],
+      "title": "各 Tool 调用量",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 15 },
+      "id": 13,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "100 * sum by (tool_name) (rate(smartserve_agent_tool_call_count_total{job=\"smartserve-backend\",outcome=\"succeeded\"}[5m])) / clamp_min(sum by (tool_name) (rate(smartserve_agent_tool_call_count_total{job=\"smartserve-backend\"}[5m])), 1e-9)", "legendFormat": "{{tool_name}}", "range": true, "refId": "A" }
+      ],
+      "title": "各 Tool 成功率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 15 },
+      "id": 14,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le, tool_name) (rate(smartserve_agent_tool_call_duration_seconds_bucket{job=\"smartserve-backend\"}[$__rate_interval])))", "legendFormat": "{{tool_name}} P95", "range": true, "refId": "A" }
+      ],
+      "title": "各 Tool P95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 19 },
+      "id": 15,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (outcome) (increase(smartserve_agent_confirmation_count_total{job=\"smartserve-backend\"}[$__range]))", "legendFormat": "{{outcome}}", "range": true, "refId": "A" }
+      ],
+      "title": "写命令批准 / 拒绝",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 19 },
+      "id": 16,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (outcome) (increase(smartserve_write_command_count_total{job=\"smartserve-backend\"}[$__range]))", "legendFormat": "{{outcome}}", "range": true, "refId": "A" }
+      ],
+      "title": "写命令执行结果",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 19 },
+      "id": 17,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "sum by (outcome) (increase(smartserve_write_command_recovery_count_total{job=\"smartserve-backend\"}[$__range]))", "legendFormat": "{{outcome}}", "range": true, "refId": "A" }
+      ],
+      "title": "恢复执行数量",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 19 },
+      "id": 18,
+      "options": { "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "editorMode": "code", "expr": "sum(smartserve_write_command_overdue{job=\"smartserve-backend\"}) or vector(0)", "legendFormat": "overdue", "range": true, "refId": "A" }
+      ],
+      "title": "超过租约的写命令",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
+      "id": 103,
+      "panels": [],
+      "title": "依赖服务与告警",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 24 },
+      "id": 19,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=\"smartserve-backend\",span_kind=\"SPAN_KIND_CLIENT\",span_name=~\"smart_customer_service\\\\..*\"}[$__rate_interval])))", "legendFormat": "MongoDB P95", "range": true, "refId": "A" }
+      ],
+      "title": "MongoDB 延迟",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 24 },
+      "id": 20,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "100 * sum(rate(traces_spanmetrics_calls_total{service=\"smartserve-backend\",span_kind=\"SPAN_KIND_CLIENT\",span_name=~\"smart_customer_service\\\\..*\",status_code=\"STATUS_CODE_ERROR\"}[5m])) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"smartserve-backend\",span_kind=\"SPAN_KIND_CLIENT\",span_name=~\"smart_customer_service\\\\..*\"}[5m])), 1e-9)", "legendFormat": "MongoDB", "range": true, "refId": "A" }
+      ],
+      "title": "MongoDB 错误率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 24 },
+      "id": 21,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=\"smartserve-backend\",span_kind=\"SPAN_KIND_CLIENT\",span_name=~\"GET|SET|SETEX|DEL|EVAL|PING|INCR|EXPIRE\"}[$__rate_interval])))", "legendFormat": "Redis P95", "range": true, "refId": "A" }
+      ],
+      "title": "Redis 延迟",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 24 },
+      "id": 22,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "100 * sum(rate(traces_spanmetrics_calls_total{service=\"smartserve-backend\",span_kind=\"SPAN_KIND_CLIENT\",span_name=~\"GET|SET|SETEX|DEL|EVAL|PING|INCR|EXPIRE\",status_code=\"STATUS_CODE_ERROR\"}[5m])) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"smartserve-backend\",span_kind=\"SPAN_KIND_CLIENT\",span_name=~\"GET|SET|SETEX|DEL|EVAL|PING|INCR|EXPIRE\"}[5m])), 1e-9)", "legendFormat": "Redis", "range": true, "refId": "A" }
+      ],
+      "title": "Redis 错误率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 28 },
+      "id": 23,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le, model) (rate(smartserve_llm_call_duration_seconds_bucket{job=\"smartserve-backend\"}[$__rate_interval])))", "legendFormat": "{{model}} P95", "range": true, "refId": "A" }
+      ],
+      "title": "DeepSeek 延迟",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 28 },
+      "id": 24,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "100 * sum(rate(smartserve_llm_call_count_total{job=\"smartserve-backend\",outcome=\"failed\"}[5m])) / clamp_min(sum(rate(smartserve_llm_call_count_total{job=\"smartserve-backend\"}[5m])), 1e-9)", "legendFormat": "DeepSeek", "range": true, "refId": "A" }
+      ],
+      "title": "DeepSeek 错误率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 28 },
+      "id": 25,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "histogram_quantile(0.95, sum by (le, action) (rate(smartserve_amap_call_duration_seconds_bucket{job=\"smartserve-backend\"}[$__rate_interval])))", "legendFormat": "{{action}} P95", "range": true, "refId": "A" }
+      ],
+      "title": "高德延迟",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "percent" }, "overrides": [] },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 28 },
+      "id": 26,
+      "options": { "legend": { "calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "editorMode": "code", "expr": "100 * sum by (action) (rate(smartserve_amap_call_count_total{job=\"smartserve-backend\",outcome=\"failed\"}[5m])) / clamp_min(sum by (action) (rate(smartserve_amap_call_count_total{job=\"smartserve-backend\"}[5m])), 1e-9)", "legendFormat": "{{action}}", "range": true, "refId": "A" }
+      ],
+      "title": "高德错误率",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "thresholds" }, "mappings": [{ "options": { "0": { "color": "red", "text": "Unavailable" }, "1": { "color": "green", "text": "Ready" } }, "type": "value" }], "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }, "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 5, "w": 8, "x": 0, "y": 32 },
+      "id": 27,
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        { "editorMode": "code", "expr": "smartserve_readiness_mongodb{job=\"smartserve-backend\"}", "legendFormat": "MongoDB", "range": true, "refId": "A" },
+        { "editorMode": "code", "expr": "smartserve_readiness_redis{job=\"smartserve-backend\"}", "legendFormat": "Redis", "range": true, "refId": "B" }
+      ],
+      "title": "Readiness",
+      "type": "stat"
+    },
+    {
+      "gridPos": { "h": 5, "w": 16, "x": 8, "y": 32 },
+      "id": 28,
+      "options": { "alertInstanceLabelFilter": "", "alertName": "", "dashboardAlerts": false, "folder": { "id": null, "title": "SmartServe Alerts" }, "groupBy": [], "groupMode": "default", "maxItems": 20, "sortOrder": 1, "stateFilter": { "error": true, "firing": true, "noData": true, "normal": true, "pending": true } },
+      "title": "告警状态",
+      "type": "alertlist"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["smartserve", "opentelemetry", "sse", "agent"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": ["development"], "value": ["development"] },
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "definition": "label_values(http_server_duration_milliseconds_count{job=\"smartserve-backend\"}, deployment_environment_name)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Environment",
+        "multi": true,
+        "name": "environment",
+        "options": [],
+        "query": { "query": "label_values(http_server_duration_milliseconds_count{job=\"smartserve-backend\"}, deployment_environment_name)", "refId": "PrometheusVariableQueryEditor-VariableQuery" },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "SmartServe 全链路总览",
+  "uid": "smartserve-overview",
+  "version": 1,
+  "weekStart": ""
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
@@ -13,6 +14,7 @@ from langchain_core.messages import (
 from langgraph.types import Command
 
 from app.agents.runtime import AgentRuntimeContext
+from app.observability import agent as agent_observability
 
 
 logger = logging.getLogger(__name__)
@@ -121,42 +123,85 @@ class AgentRunner:
         config: dict,
         context: AgentRuntimeContext,
     ) -> AsyncIterator[dict[str, Any]]:
-        emitted = ""
-        yield {"type": "status", "phase": "thinking", "label": "正在理解问题"}
-        async for part in self.graph.astream(
-            graph_input,
-            config=config,
-            context=context,
-            stream_mode=["messages", "updates"],
-            version="v2",
-        ):
-            part_type, data = self._part(part)
-            if part_type == "messages":
-                message, metadata = data
-                node = metadata.get("langgraph_node", "") if isinstance(metadata, dict) else ""
-                if node not in {"model", "clarify", "confirm_write"}:
-                    continue
-                text = self._message_text(message)
-                if text:
-                    emitted += text
-                    yield {"type": "token", "delta": text}
-            elif part_type == "updates" and isinstance(data, dict):
-                if "execute_read_tool" in data:
-                    yield {"type": "status", "phase": "using_tool", "label": "正在调用业务服务"}
-                elif "append_write_result" in data:
-                    yield {"type": "status", "phase": "reading_result", "label": "正在整理执行结果"}
+        thread_id = config["configurable"]["thread_id"]
+        _, conversation_id = thread_id.split(":", 1)
+        operation = "resume" if isinstance(graph_input, Command) else "message"
+        attributes = {
+            "agent.operation": operation,
+            "app.conversation_id": conversation_id,
+        }
+        with agent_observability.telemetry.start_span(
+            "agent.graph",
+            attributes=attributes,
+        ) as span:
+            emitted = ""
+            outcome = "completed"
+            try:
+                yield {
+                    "type": "status",
+                    "phase": "thinking",
+                    "label": "正在理解问题",
+                }
+                async for part in self.graph.astream(
+                    graph_input,
+                    config=config,
+                    context=context,
+                    stream_mode=["messages", "updates"],
+                    version="v2",
+                ):
+                    part_type, data = self._part(part)
+                    if part_type == "messages":
+                        message, metadata = data
+                        node = (
+                            metadata.get("langgraph_node", "")
+                            if isinstance(metadata, dict)
+                            else ""
+                        )
+                        if node not in {"model", "clarify", "confirm_write"}:
+                            continue
+                        text = self._message_text(message)
+                        if text:
+                            emitted += text
+                            yield {"type": "token", "delta": text}
+                    elif part_type == "updates" and isinstance(data, dict):
+                        if "execute_read_tool" in data:
+                            yield {
+                                "type": "status",
+                                "phase": "using_tool",
+                                "label": "正在调用业务服务",
+                            }
+                        elif "append_write_result" in data:
+                            yield {
+                                "type": "status",
+                                "phase": "reading_result",
+                                "label": "正在整理执行结果",
+                            }
 
-        pending = await self._pending_from_config(config)
-        if pending:
-            yield {"type": "confirmation_required", **pending}
-            return
-        if not emitted:
-            snapshot = await self.graph.aget_state(config)
-            messages = snapshot.values.get("messages", []) if snapshot.values else []
-            if messages and isinstance(messages[-1], AIMessage):
-                text = self._message_text(messages[-1])
-                if text:
-                    yield {"type": "token", "delta": text}
+                pending = await self._pending_from_config(config)
+                if pending:
+                    outcome = "awaiting_confirmation"
+                    yield {"type": "confirmation_required", **pending}
+                    return
+                if not emitted:
+                    snapshot = await self.graph.aget_state(config)
+                    messages = (
+                        snapshot.values.get("messages", [])
+                        if snapshot.values
+                        else []
+                    )
+                    if messages and isinstance(messages[-1], AIMessage):
+                        text = self._message_text(messages[-1])
+                        if text:
+                            yield {"type": "token", "delta": text}
+            except (asyncio.CancelledError, GeneratorExit):
+                outcome = "cancelled"
+                raise
+            except Exception as exc:
+                outcome = "error"
+                agent_observability.telemetry.record_exception(span, exc)
+                raise
+            finally:
+                agent_observability.telemetry.set_outcome(span, outcome)
 
     async def _pending_from_config(self, config: dict) -> dict | None:
         thread_id = config["configurable"]["thread_id"]

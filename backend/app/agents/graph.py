@@ -13,6 +13,8 @@ from langgraph.types import interrupt
 
 from app.agents.runtime import AgentRuntimeContext
 from app.agents.state import AgentState
+from app.config import settings
+from app.observability import agent as agent_observability
 from app.prompts.service_agent import prompt_with_task
 from app.services.write_command_service import WriteCommandPreparationError
 from app.tools.service_tools import ServiceToolRegistry, ToolValidationFailure
@@ -57,8 +59,55 @@ async def model_node(
         content=prompt_with_task(state.get("active_tool"), state.get("slots", {}))
     )
     messages = [system, *state.get("messages", [])[-30:]]
-    response = await model.ainvoke(messages)
+    with agent_observability.telemetry.start_span(
+        "agent.model",
+        attributes={"gen_ai.request.model": settings.MODEL_NAME},
+    ) as span:
+        started_at = agent_observability.telemetry.now()
+        try:
+            response = await model.ainvoke(messages)
+        except Exception as exc:
+            agent_observability.telemetry.record_exception(span, exc)
+            agent_observability.telemetry.record_llm_call(
+                agent_observability.telemetry.elapsed(started_at),
+                model=settings.MODEL_NAME,
+                outcome="failed",
+                error_type=type(exc).__name__,
+            )
+            raise
+        agent_observability.telemetry.set_outcome(span, "completed")
+        input_tokens, output_tokens = _response_token_usage(response)
+        agent_observability.telemetry.record_llm_call(
+            agent_observability.telemetry.elapsed(started_at),
+            model=settings.MODEL_NAME,
+            outcome="succeeded",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        )
     return {"messages": [response]}
+
+
+def _response_token_usage(response: AIMessage) -> tuple[int | None, int | None]:
+    usage = response.usage_metadata
+    if not isinstance(usage, dict):
+        token_usage = response.response_metadata.get("token_usage")
+        usage = token_usage if isinstance(token_usage, dict) else {}
+
+    def token_value(*names: str) -> int | None:
+        for name in names:
+            value = usage.get(name)
+            if (
+                isinstance(value, int)
+                and not isinstance(value, bool)
+                and value >= 0
+            ):
+                return value
+        return None
+
+    return (
+        token_value("input_tokens", "prompt_tokens"),
+        token_value("output_tokens", "completion_tokens"),
+    )
 
 
 def route_after_model(state: AgentState) -> Literal["validate_tool", "__end__"]:
@@ -155,16 +204,41 @@ async def prepare_write_command_node(
 ) -> dict:
     action = state["pending_action"]
     call = state["active_call"]
+    outcome = "prepared"
+    error_type = None
     try:
-        if runtime.context.command_service is None:
-            raise RuntimeError("Write command service is not configured")
-        command = await runtime.context.command_service.prepare(
-            command_id=action["command_id"],
-            user_id=runtime.context.user_id,
-            conversation_id=runtime.context.conversation_id,
-            action=action["name"],
-            arguments=action["args"],
-        )
+        with agent_observability.telemetry.start_span(
+            "agent.confirmation.prepare",
+            attributes={
+                "agent.action": action["name"],
+                "app.command_id": action["command_id"],
+            },
+        ) as span:
+            try:
+                if runtime.context.command_service is None:
+                    raise RuntimeError("Write command service is not configured")
+                command = await runtime.context.command_service.prepare(
+                    command_id=action["command_id"],
+                    user_id=runtime.context.user_id,
+                    conversation_id=runtime.context.conversation_id,
+                    action=action["name"],
+                    arguments=action["args"],
+                )
+            except WriteCommandPreparationError as exc:
+                outcome = "failed"
+                error_type = exc.code
+                agent_observability.telemetry.set_outcome(
+                    span,
+                    outcome,
+                    error_type=error_type,
+                )
+                raise
+            except Exception as exc:
+                outcome = "failed"
+                error_type = type(exc).__name__
+                agent_observability.telemetry.record_exception(span, exc)
+                raise
+            agent_observability.telemetry.set_outcome(span, outcome)
     except WriteCommandPreparationError as exc:
         result = exc.result
     except Exception:
@@ -190,6 +264,12 @@ async def prepare_write_command_node(
         if command.get("presentation"):
             pending_action["presentation"] = command["presentation"]
         return {"pending_action": pending_action}
+    finally:
+        agent_observability.telemetry.record_confirmation(
+            action=action["name"],
+            outcome=outcome,
+            error_type=error_type,
+        )
 
     return {
         "messages": [
@@ -263,12 +343,33 @@ async def execute_read_tool_node(
         }
     if ServiceToolRegistry.is_write(call["name"]):
         raise RuntimeError("Write tools cannot execute inside LangGraph")
+    started_at = agent_observability.telemetry.now()
+    outcome = "succeeded"
+    error_type = None
     try:
-        result = await runtime.context.tools.execute_read(
-            call["name"],
-            call["args"],
-            user_id=runtime.context.user_id,
-        )
+        with agent_observability.telemetry.start_span(
+            f"agent.tool.{call['name']}",
+            attributes={"agent.tool.name": call["name"]},
+        ) as span:
+            try:
+                result = await runtime.context.tools.execute_read(
+                    call["name"],
+                    call["args"],
+                    user_id=runtime.context.user_id,
+                )
+            except Exception as exc:
+                outcome = "failed"
+                error_type = type(exc).__name__
+                agent_observability.telemetry.record_exception(span, exc)
+                raise
+            if not result.get("ok"):
+                outcome = "failed"
+                error_type = str(result.get("code") or "TOOL_FAILED")
+            agent_observability.telemetry.set_outcome(
+                span,
+                outcome,
+                error_type=error_type,
+            )
     except Exception:
         logger.exception("Agent tool execution failed tool=%s", call["name"])
         result = {
@@ -276,6 +377,13 @@ async def execute_read_tool_node(
             "code": "TOOL_EXECUTION_FAILED",
             "message": "业务服务暂时不可用，请稍后重试",
         }
+    finally:
+        agent_observability.telemetry.record_tool_call(
+            agent_observability.telemetry.elapsed(started_at),
+            tool_name=call["name"],
+            outcome=outcome,
+            error_type=error_type,
+        )
     return {
         "messages": [
             ToolMessage(

@@ -37,7 +37,6 @@ class LiveLlmIntegrationTests(unittest.IsolatedAsyncioTestCase):
             async with httpx.AsyncClient(trust_env=False) as http_client:
                 model = create_llm(http_async_client=http_client).bind_tools(
                     [SPECS["list_shops"].openai_schema()],
-                    tool_choice="list_shops",
                 )
                 response = await model.ainvoke([
                     SystemMessage(content="必须调用 list_shops，只允许执行只读查询。"),

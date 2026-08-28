@@ -4,6 +4,9 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
+from app.constants.write_command_status import WriteCommandStatus
+from app.observability import agent as agent_observability
+
 
 logger = logging.getLogger(__name__)
 
@@ -53,19 +56,69 @@ class WriteCommandWorker:
                     approved_before=now
                     - timedelta(seconds=self.recovery_grace_seconds),
                 )
+                overdue_count = sum(
+                    1
+                    for command in commands
+                    if command.get("status")
+                    == WriteCommandStatus.EXECUTING.value
+                    and command.get("lease_until") is not None
+                    and command["lease_until"] <= now
+                )
+                agent_observability.telemetry.record_write_command_overdue(
+                    overdue_count
+                )
                 for command in commands:
                     if self._stop.is_set():
                         return
-                    try:
-                        await self.executor.execute_or_replay(
-                            command_id=command["command_id"],
-                            user_id=command["user_id"],
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Write command recovery failed command_id=%s",
-                            command.get("command_id"),
-                        )
+                    links = agent_observability.links_from_trace_context(
+                        command.get("trace_context")
+                    )
+                    with agent_observability.telemetry.start_span(
+                        "write_command.recovery",
+                        attributes={
+                            "app.command_id": command["command_id"],
+                            "agent.action": str(
+                                command.get("action") or "unknown"
+                            ),
+                        },
+                        links=links,
+                    ) as span:
+                        try:
+                            recovered = await self.executor.execute_or_replay(
+                                command_id=command["command_id"],
+                                user_id=command["user_id"],
+                            )
+                        except Exception as exc:
+                            agent_observability.telemetry.record_exception(
+                                span,
+                                exc,
+                            )
+                            agent_observability.telemetry.set_outcome(
+                                span,
+                                "failed",
+                                error_type=type(exc).__name__,
+                            )
+                            logger.exception(
+                                "Write command recovery failed command_id=%s",
+                                command.get("command_id"),
+                            )
+                            agent_observability.telemetry.record_write_command_recovery(
+                                action=str(command.get("action") or "unknown"),
+                                outcome="failed",
+                                error_type=type(exc).__name__,
+                            )
+                        else:
+                            recovery_outcome = str(
+                                recovered.get("status") or "completed"
+                            )
+                            agent_observability.telemetry.set_outcome(
+                                span,
+                                recovery_outcome,
+                            )
+                            agent_observability.telemetry.record_write_command_recovery(
+                                action=str(command.get("action") or "unknown"),
+                                outcome=recovery_outcome,
+                            )
             except asyncio.CancelledError:
                 raise
             except Exception:

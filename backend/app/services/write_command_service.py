@@ -10,6 +10,7 @@ from app.constants.write_command_status import (
     WriteCommandStatus,
     is_terminal_write_command_status,
 )
+from app.observability import agent as agent_observability
 
 
 class WriteCommandError(RuntimeError):
@@ -129,6 +130,7 @@ class WriteCommandService:
             "graph_resume_lease_until": None,
             "assistant_response": None,
             "assistant_message_id": None,
+            "trace_context": agent_observability.capture_trace_context(),
             "created_at": now,
             "updated_at": now,
             "expires_at": now + timedelta(seconds=self.confirmation_ttl_seconds),

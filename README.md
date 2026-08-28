@@ -84,6 +84,12 @@ npm install package-name
 MODEL_NAME=deepseek-v4-flash
 DEEPSEEK_API_KEY=replace-with-your-api-key
 DEEPSEEK_BASE_URL=https://api.example.com
+OBSERVABILITY_ENABLED=false
+OTEL_SERVICE_NAME=smartserve-backend
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+OTEL_ENVIRONMENT=development
+OTEL_TRACE_SAMPLE_RATIO=1.0
+OTEL_METRIC_EXPORT_INTERVAL=10000
 MONGODB_URL=mongodb://localhost:27017/?replicaSet=rs0
 MONGODB_DB_NAME=smart_customer_service
 REDIS_URL=redis://127.0.0.1:6380/0
@@ -100,6 +106,11 @@ AGENT_LOCK_LEASE_SECONDS=120
 VITE_API_BASE_URL=http://127.0.0.1:8000
 VITE_AMAP_JS_KEY=replace-with-your-amap-jsapi-key
 VITE_AMAP_SECURITY_JS_CODE=replace-with-your-amap-security-js-code
+VITE_OBSERVABILITY_ENABLED=false
+VITE_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=/telemetry/v1/traces
+VITE_OTEL_SERVICE_NAME=smartserve-web
+VITE_OTEL_ENVIRONMENT=development
+VITE_OTEL_TRACE_SAMPLE_RATIO=1.0
 ```
 
 `AMAP_WEB_SERVICE_KEY` 与 Web 端 JSAPI Key 是不同平台类型。`VITE_*` 会进入浏览器包，静态安全密钥只适用于本地演示；生产环境应切换到高德安全代理方式。任何真实密钥都不能提交。
@@ -119,15 +130,18 @@ VITE_AMAP_SECURITY_JS_CODE=replace-with-your-amap-security-js-code
 .\scripts\dev.ps1
 ```
 
-脚本会启动/检查 Redis，确认 MongoDB，后台运行 Uvicorn，然后以前台方式运行 Vite。退出 Vite 后只清理由该脚本创建的后端进程。
+脚本会启动/检查 Redis 和本地 Grafana LGTM，确认 MongoDB，开启后端 OpenTelemetry，后台运行 Uvicorn，然后以前台方式运行 Vite。退出 Vite 后只清理由该脚本创建的后端进程，Redis 与观测容器继续运行。
 
 - 前端：`http://127.0.0.1:5173`
 - Swagger：`http://127.0.0.1:8000/docs`
+- Grafana：`http://127.0.0.1:3000`（本地默认账号和密码均为 `admin`）
 - 存活：`http://127.0.0.1:8000/health/live`
 - 就绪：`http://127.0.0.1:8000/health/ready`
 - 后端运行日志：`.runtime-logs/`
 
-Redis 容器为 `smartserve-redis`，只绑定 `127.0.0.1:6380`；6379 保留给已有项目。AOF 数据存放在命名卷 `smartserve_redis_data`。
+Redis 容器为 `smartserve-redis`，只绑定 `127.0.0.1:6380`；6379 保留给已有项目。AOF 数据存放在命名卷 `smartserve_redis_data`。观测容器为 `smartserve-observability`，Grafana、OTLP gRPC 和 OTLP HTTP 分别只绑定本机的 3000、4317 和 4318 端口，数据存放在 `smartserve_observability_data`。
+
+`scripts/dev.ps1` 仅为本地开发进程开启后端和浏览器观测，不会修改 `.env`。后端自动追踪 FastAPI、HTTPX、MongoDB 和 Redis；浏览器追踪页面加载、Fetch、路由切换及完整 SSE 生命周期。浏览器只向同源 `/telemetry/v1/traces` 上报，由后端完成 Bearer 认证、来源校验、Redis 限流和请求体限制后转发到内部 Collector，生产环境不应公开 Collector。请求体、认证头、Cookie、MongoDB statement、Redis 值和聊天内容不会被采集。手工启动时观测默认保持关闭。
 
 ## 公共 API
 
@@ -201,6 +215,11 @@ SSE 已开始后的模型错误使用同样的 `code/message/request_id` 字段�
 
 该开关仅在当前进程覆盖 `MODEL_NAME=deepseek-v4-flash`，不会修改 `backend/.env`，测试不会调用任何写工具。
 
+观测改造前后的性能基线、字段契约和可重复采样命令见
+[观测基线与数据契约](docs/observability-baseline.md)以及
+[端到端观测验收](docs/observability-acceptance.md)。默认采样不会调用模型；
+只有显式传入 Bearer Token 和聊天提示词时才执行聊天场景。
+
 ## 常见问题
 
 ### 地图提示未配置
@@ -223,4 +242,4 @@ SSE 已开始后的模型错误使用同样的 `code/message/request_id` 字段�
 
 1. 增加知识库 RAG、标准问答数据集与 Agent 离线评测。
 2. 迁移地图 Demo 的 MCP Schema 与严格校验测试，不复制业务实现。
-3. 增加 LangSmith/自建链路追踪、成本、延迟和工具成功率指标。
+3. 在现有 OpenTelemetry 基础上增加 Agent、成本、首 Token 延迟和工具成功率业务指标。

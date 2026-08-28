@@ -10,6 +10,7 @@ from app.constants.write_command_status import (
     WriteCommandStatus,
     is_terminal_write_command_status,
 )
+from app.observability import agent as agent_observability
 from app.services.write_command_service import (
     WriteCommandExecutionInProgressError,
     WriteCommandExecutionLeaseLostError,
@@ -63,12 +64,114 @@ class WriteCommandExecutor:
         command_id: str,
         user_id: str,
     ) -> dict[str, Any]:
-        command = await self.repository.find_owned(
-            command_id=command_id,
-            user_id=user_id,
-        )
+        try:
+            command = await self.repository.find_owned(
+                command_id=command_id,
+                user_id=user_id,
+            )
+        except Exception as exc:
+            with agent_observability.telemetry.start_span(
+                "write_command.execute",
+                attributes={"app.command_id": command_id},
+            ) as span:
+                agent_observability.telemetry.record_exception(span, exc)
+                agent_observability.telemetry.set_outcome(
+                    span,
+                    "failed",
+                    error_type=type(exc).__name__,
+                )
+            agent_observability.telemetry.record_write_command(
+                action="unknown",
+                outcome="failed",
+                error_type=type(exc).__name__,
+            )
+            raise
         if command is None:
-            raise WriteCommandNotFoundError("Write command not found")
+            error = WriteCommandNotFoundError("Write command not found")
+            with agent_observability.telemetry.start_span(
+                "write_command.execute",
+                attributes={"app.command_id": command_id},
+            ) as span:
+                agent_observability.telemetry.record_exception(span, error)
+                agent_observability.telemetry.set_outcome(
+                    span,
+                    "not_found",
+                    error_type=error.code,
+                )
+            agent_observability.telemetry.record_write_command(
+                action="unknown",
+                outcome="not_found",
+                error_type=error.code,
+            )
+            raise error
+
+        action = str(command.get("action") or "unknown")
+        was_terminal = is_terminal_write_command_status(command["status"])
+        links = agent_observability.links_from_trace_context(
+            command.get("trace_context")
+        )
+        outcome = "failed"
+        error_type = None
+        with agent_observability.telemetry.start_span(
+            "write_command.execute",
+            attributes={
+                "app.command_id": command_id,
+                "agent.action": action,
+                "write_command.initial_status": command["status"],
+            },
+            links=links,
+        ) as span:
+            try:
+                result = await self._execute_loaded(
+                    command,
+                    command_id=command_id,
+                    user_id=user_id,
+                )
+                if was_terminal:
+                    outcome = "replayed"
+                else:
+                    outcome = str(result.get("status") or "unknown")
+                    if outcome in {
+                        WriteCommandStatus.CONFLICT.value,
+                        WriteCommandStatus.FAILED.value,
+                    }:
+                        command_result = result.get("result")
+                        if isinstance(command_result, dict):
+                            error_type = str(
+                                command_result.get("code") or "COMMAND_FAILED"
+                            )
+                return result
+            except Exception as exc:
+                error_type = getattr(exc, "code", type(exc).__name__)
+                if isinstance(exc, WriteCommandExecutionInProgressError):
+                    outcome = "in_progress"
+                elif isinstance(exc, WriteCommandExecutionLeaseLostError):
+                    outcome = "lease_lost"
+                elif isinstance(exc, WriteCommandNotFoundError):
+                    outcome = "not_found"
+                else:
+                    outcome = "failed"
+                agent_observability.telemetry.record_exception(span, exc)
+                raise
+            finally:
+                agent_observability.telemetry.set_outcome(
+                    span,
+                    outcome,
+                    error_type=error_type,
+                )
+                agent_observability.telemetry.record_write_command(
+                    action=action,
+                    outcome=outcome,
+                    error_type=error_type,
+                )
+
+    async def _execute_loaded(
+        self,
+        command: dict[str, Any],
+        *,
+        command_id: str,
+        user_id: str,
+    ) -> dict[str, Any]:
         if is_terminal_write_command_status(command["status"]):
             return command
         if command["status"] == WriteCommandStatus.AWAITING_CONFIRMATION.value:

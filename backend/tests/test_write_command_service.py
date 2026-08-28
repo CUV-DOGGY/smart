@@ -2,7 +2,10 @@ import copy
 import unittest
 from datetime import datetime, timezone
 
+from opentelemetry.sdk.trace import TracerProvider
+
 from app.constants.write_command_status import WriteCommandStatus
+from app.observability.agent import links_from_trace_context
 from app.services.write_command_executor import WriteCommandExecutor
 from app.services.write_command_service import (
     WriteCommandIdempotencyConflictError,
@@ -187,6 +190,19 @@ class WriteCommandServiceTests(unittest.IsolatedAsyncioTestCase):
                 service,
                 arguments={"order_id": "order-002"},
             )
+
+    async def test_prepare_persists_trace_context_for_async_recovery_link(self):
+        _, _, service = self.make()
+        provider = TracerProvider()
+        tracer = provider.get_tracer("write-command-link-test")
+        with tracer.start_as_current_span("agent.confirmation.prepare") as span:
+            origin_trace_id = span.get_span_context().trace_id
+            command = await self.prepare(service)
+
+        self.assertIn("traceparent", command["trace_context"])
+        links = links_from_trace_context(command["trace_context"])
+        self.assertEqual(len(links), 1)
+        self.assertEqual(links[0].context.trace_id, origin_trace_id)
 
     async def test_decision_idempotency_key_cannot_be_reused_for_another_command(self):
         _, _, service = self.make()

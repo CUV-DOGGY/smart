@@ -11,5 +11,9 @@ _TEST_ENVIRONMENT = {
     "RATE_LIMIT_KEY_SECRET": "test-rate-limit-key-at-least-32-characters",
 }
 
-for _name, _value in _TEST_ENVIRONMENT.items():
-    os.environ.setdefault(_name, _value)
+# Live integrations are explicitly authorized by the caller and must use the
+# developer's real environment/.env settings. Offline tests keep deterministic
+# placeholders and never contact external services.
+if os.getenv("RUN_LLM_INTEGRATION") != "1":
+    for _name, _value in _TEST_ENVIRONMENT.items():
+        os.environ.setdefault(_name, _value)

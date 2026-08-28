@@ -12,6 +12,11 @@ from app.agents.runner import (
 )
 from app.agents.runtime import AgentRuntimeContext
 from app.core.api_errors import ApiError
+from app.observability.context import (
+    bind_run_id,
+    reset_run_id,
+    set_current_span_run_id,
+)
 from app.dependencies.auth import get_current_user_id
 from app.dependencies.services import (
     get_agent_chat_service,
@@ -231,6 +236,8 @@ def _streaming_response(
     run_id = str(uuid.uuid4())
 
     async def events() -> AsyncIterator[str]:
+        run_id_token = bind_run_id(run_id)
+        set_current_span_run_id(run_id)
         try:
             yield _sse({"type": "meta", "conversation_id": conversation_id, "run_id": run_id})
             async for event in source:
@@ -238,7 +245,10 @@ def _streaming_response(
                     event["request_id"] = request_id
                 yield _sse(event)
         finally:
-            await lock_context.__aexit__(None, None, None)
+            try:
+                await lock_context.__aexit__(None, None, None)
+            finally:
+                reset_run_id(run_id_token)
 
     return StreamingResponse(
         events(),

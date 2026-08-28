@@ -14,6 +14,13 @@ const EMPTY = {
   formatted_address: '',
 };
 
+function showPhoneValidationMessage(event) {
+  const input = event.currentTarget;
+  input.setCustomValidity(
+    input.validity.patternMismatch ? '手机号码格式不正确' : '',
+  );
+}
+
 export function AddressForm({ initialValue, onSubmit, onCancel }) {
   const [form, setForm] = useState(() => ({ ...EMPTY, ...initialValue }));
   const [showMap, setShowMap] = useState(false);
@@ -79,9 +86,15 @@ export function AddressForm({ initialValue, onSubmit, onCancel }) {
             手机号
             <input
               required
+              type="tel"
+              inputMode="numeric"
+              autoComplete="tel"
+              maxLength="11"
               pattern="1[3-9][0-9]{9}"
               value={form.receiver_phone}
               onChange={change('receiver_phone')}
+              onInput={(event) => event.currentTarget.setCustomValidity('')}
+              onInvalid={showPhoneValidationMessage}
             />
           </label>
         </div>

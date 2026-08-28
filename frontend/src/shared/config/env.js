@@ -2,6 +2,24 @@ export const env = Object.freeze({
   apiBaseUrl: (
     import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000'
   ).replace(/\/$/, ''),
+  orderCreateTimeoutMs: parsePositiveInteger(
+    import.meta.env.VITE_ORDER_CREATE_TIMEOUT_MS,
+    8000,
+  ),
+  orderAttemptQueryTimeoutMs: parsePositiveInteger(
+    import.meta.env.VITE_ORDER_ATTEMPT_QUERY_TIMEOUT_MS,
+    3000,
+  ),
   amapKey: import.meta.env.VITE_AMAP_JS_KEY?.trim() || '',
   amapSecurityCode: import.meta.env.VITE_AMAP_SECURITY_JS_CODE?.trim() || '',
 });
+
+function parseSampleRatio(rawValue) {
+  const value = Number(rawValue ?? 1);
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : 1;
+}
+
+function parsePositiveInteger(rawValue, fallback) {
+  const value = Number(rawValue);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}

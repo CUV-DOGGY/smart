@@ -1,3 +1,5 @@
+from enum import Enum
+
 from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Literal
 from datetime import datetime
@@ -162,3 +164,19 @@ class OrderHistoryPage(BaseModel):
 class OrderCancelResult(BaseModel):
     order_id: str
     order_status: OrderStatus
+
+
+class OrderAttemptStatus(str, Enum):
+    NOT_FOUND = "not_found"
+    RECEIVED = "received"
+    PROCESSING = "processing"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class OrderAttemptResult(BaseModel):
+    status: OrderAttemptStatus
+    order: OrderQueryByIdData | None = None
+    failure_code: str | None = None
+    expires_at: datetime | None = None

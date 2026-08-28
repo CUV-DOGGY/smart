@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 
 from app.schemas.address import UserAddress
 from app.schemas.order import OrderCreate
@@ -31,6 +31,7 @@ TEST_IDEMPOTENCY_KEY = "checkout-test-001"
 class FakeOrderRepository:
     def __init__(self):
         self.created_order: dict | None = None
+        self.order_attempt: dict | None = None
         self.transaction_count = 0
         self.hide_existing_once = False
         self.raise_uniqueness_conflict = False
@@ -52,6 +53,7 @@ class FakeOrderRepository:
         *,
         user_id: str,
         idempotency_key: str,
+        session=None,
     ) -> dict | None:
         if self.hide_existing_once:
             self.hide_existing_once = False
@@ -63,6 +65,48 @@ class FakeOrderRepository:
         ):
             return None
         return self.created_order
+
+    async def create_or_get_order_attempt(self, attempt_data: dict, session=None):
+        if self.order_attempt is None:
+            self.order_attempt = dict(attempt_data)
+        return dict(self.order_attempt)
+
+    async def find_order_attempt(
+        self,
+        *,
+        user_id: str,
+        idempotency_key: str,
+        session=None,
+    ):
+        if (
+            self.order_attempt is None
+            or self.order_attempt["user_id"] != user_id
+            or self.order_attempt["idempotency_key"] != idempotency_key
+        ):
+            return None
+        return dict(self.order_attempt)
+
+    async def update_order_attempt(
+        self,
+        *,
+        user_id: str,
+        idempotency_key: str,
+        update_data: dict,
+        expected_statuses=None,
+        session=None,
+    ):
+        if (
+            self.order_attempt is None
+            or self.order_attempt["user_id"] != user_id
+            or self.order_attempt["idempotency_key"] != idempotency_key
+            or (
+                expected_statuses
+                and self.order_attempt["status"] not in expected_statuses
+            )
+        ):
+            return None
+        self.order_attempt.update(update_data)
+        return dict(self.order_attempt)
 
 
 class FakeProductRepository:
@@ -317,6 +361,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
             len(order_repository.created_order["idempotency_request_hash"]),
             64,
         )
+        self.assertEqual(order_repository.order_attempt["status"], "succeeded")
+        self.assertEqual(
+            order_repository.order_attempt["order_id"],
+            response.order_id,
+        )
 
     async def test_same_idempotency_key_returns_existing_order(self):
         service, order_repository, product_repository, _ = self.make_service(
@@ -364,6 +413,53 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
             [("food-001", 2)],
         )
 
+    async def test_idempotency_key_can_recover_created_order(self):
+        service, _, _, _ = self.make_service([make_product()])
+
+        created = await service.create_order(
+            make_order(),
+            "user-001",
+            idempotency_key=TEST_IDEMPOTENCY_KEY,
+        )
+        recovered = await service.query_order_attempt(
+            TEST_IDEMPOTENCY_KEY,
+            "user-001",
+        )
+
+        self.assertEqual(recovered.status.value, "succeeded")
+        self.assertEqual(recovered.order.order_id, created.order_id)
+        self.assertEqual(recovered.order.user_id, "user-001")
+
+    async def test_missing_order_attempt_is_reported_without_retrying_forever(self):
+        service, _, _, _ = self.make_service([make_product()])
+
+        recovered = await service.query_order_attempt(
+            TEST_IDEMPOTENCY_KEY,
+            "user-001",
+        )
+
+        self.assertEqual(recovered.status.value, "not_found")
+
+    async def test_stale_processing_attempt_expires(self):
+        service, order_repository, _, _ = self.make_service([make_product()])
+        order_repository.order_attempt = {
+            "user_id": "user-001",
+            "idempotency_key": TEST_IDEMPOTENCY_KEY,
+            "status": "processing",
+            "failure_code": None,
+            "expires_at": (TEST_NOW - timedelta(seconds=1)).replace(
+                tzinfo=None
+            ),
+        }
+
+        recovered = await service.query_order_attempt(
+            TEST_IDEMPOTENCY_KEY,
+            "user-001",
+        )
+
+        self.assertEqual(recovered.status.value, "expired")
+        self.assertEqual(order_repository.order_attempt["status"], "expired")
+
     async def test_concurrent_key_conflict_returns_the_winning_order(self):
         service, order_repository, _, _ = self.make_service([make_product()])
         first_response = await service.create_order(
@@ -373,6 +469,7 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
         )
 
         order_repository.hide_existing_once = True
+        order_repository.order_attempt["status"] = "processing"
         order_repository.raise_uniqueness_conflict = True
         second_response = await service.create_order(
             make_order(),
@@ -412,6 +509,11 @@ class OrderCreateServiceTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertIsNone(order_repository.created_order)
+        self.assertEqual(order_repository.order_attempt["status"], "failed")
+        self.assertEqual(
+            order_repository.order_attempt["failure_code"],
+            "SHOP_NOT_FOUND",
+        )
 
     async def test_rejects_inactive_shop(self):
         service, order_repository, _, _ = self.make_service(

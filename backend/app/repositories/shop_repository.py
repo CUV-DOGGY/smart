@@ -31,7 +31,6 @@ class ShopRepository:
             documents = await self.shop_collection.find(
                 {
                     "is_active": True,
-                    "is_accepting_orders": True,
                 },
                 {"_id": 0},
             ).sort("shop_name", 1).to_list(length=limit)

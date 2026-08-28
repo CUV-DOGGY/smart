@@ -21,6 +21,8 @@ from app.schemas.delivery import (
     ResolvedDeliveryLocation,
 )
 from app.schemas.order import (
+    OrderAttemptResult,
+    OrderAttemptStatus,
     OrderCancelResponse,
     OrderCreate,
     OrderCreateResponse,
@@ -35,7 +37,22 @@ from app.schemas.order import (
 )
 from app.schemas.product import Product
 from app.schemas.shop import Shop
-from app.services.delivery_location_service import DeliveryLocationService
+from app.services.delivery_location_service import (
+    DeliveryLocationService,
+    OutsideDeliveryAreaError,
+    ShopDeliveryConfigurationError,
+)
+
+
+ORDER_ATTEMPT_TIMEOUT = timedelta(minutes=5)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 class ShopNotFoundError(RuntimeError):
@@ -78,6 +95,18 @@ class IdempotencyKeyConflictError(RuntimeError):
     """同一个幂等键被用于不同的创建订单请求。"""
 
 
+class OrderAttemptFailedError(RuntimeError):
+    """同一个幂等键对应的下单尝试已经明确失败。"""
+
+    def __init__(self, failure_code: str | None) -> None:
+        super().__init__("Order attempt already failed")
+        self.failure_code = failure_code or "ORDER_ATTEMPT_FAILED"
+
+
+class OrderAttemptExpiredError(RuntimeError):
+    """同一个幂等键对应的下单尝试已经过期。"""
+
+
 class OrderNotFoundError(RuntimeError):
     """The order does not exist or is not accessible to the user."""
 
@@ -93,6 +122,22 @@ class OrderStateConflictError(RuntimeError):
     ) -> None:
         super().__init__(message)
         self.current_status = current_status
+
+
+ORDER_ATTEMPT_FAILURE_CODES = {
+    OrderAddressNotFoundError: "ADDRESS_NOT_FOUND",
+    ShopNotFoundError: "SHOP_NOT_FOUND",
+    ProductNotFoundError: "PRODUCT_NOT_FOUND",
+    ShopDeliveryConfigurationError: "SHOP_DELIVERY_CONFIG_NOT_CONFIGURED",
+    OutsideDeliveryAreaError: "OUTSIDE_DELIVERY_AREA",
+    ShopUnavailableError: "SHOP_UNAVAILABLE",
+    ShopClosedError: "SHOP_CLOSED",
+    ProductUnavailableError: "PRODUCT_UNAVAILABLE",
+    InsufficientStockError: "INSUFFICIENT_STOCK",
+    MinimumOrderAmountError: "MINIMUM_ORDER_AMOUNT",
+    InventoryReservationError: "INVENTORY_CHANGED",
+}
+ORDER_ATTEMPT_FAILURES = tuple(ORDER_ATTEMPT_FAILURE_CODES)
 
 
 @dataclass(frozen=True)
@@ -141,17 +186,11 @@ class OrderService:
             order=order,
             requested_quantities=requested_quantities,
         )
-        if session is None:
-            existing_order = await self.repository.find_by_idempotency_key(
-                user_id=user_id,
-                idempotency_key=idempotency_key,
-            )
-        else:
-            existing_order = await self.repository.find_by_idempotency_key(
-                user_id=user_id,
-                idempotency_key=idempotency_key,
-                session=session,
-            )
+        existing_order = await self.repository.find_by_idempotency_key(
+            user_id=user_id,
+            idempotency_key=idempotency_key,
+            session=session,
+        )
         if existing_order is not None:
             return self._response_from_idempotent_order(
                 existing_order,
@@ -162,6 +201,73 @@ class OrderService:
         create_time = self.now_provider()
         if create_time.tzinfo is None:
             raise RuntimeError("now_provider must return a timezone-aware datetime")
+
+        attempt = await self.repository.create_or_get_order_attempt(
+            {
+                "user_id": user_id,
+                "idempotency_key": idempotency_key,
+                "request_hash": request_hash,
+                "status": OrderAttemptStatus.RECEIVED.value,
+                "order_id": None,
+                "failure_code": None,
+                "created_at": create_time,
+                "updated_at": create_time,
+                "expires_at": create_time + ORDER_ATTEMPT_TIMEOUT,
+            },
+            session=session,
+        )
+        if attempt.get("request_hash") != request_hash:
+            raise IdempotencyKeyConflictError(
+                "Idempotency key was already used for another order request"
+            )
+
+        attempt_status = OrderAttemptStatus(attempt["status"])
+        if attempt_status is OrderAttemptStatus.FAILED:
+            raise OrderAttemptFailedError(attempt.get("failure_code"))
+        if attempt_status is OrderAttemptStatus.EXPIRED:
+            raise OrderAttemptExpiredError("Order attempt has expired")
+        expires_at = _as_utc(attempt.get("expires_at"))
+        if expires_at is not None and expires_at <= create_time:
+            await self.repository.update_order_attempt(
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+                update_data={
+                    "status": OrderAttemptStatus.EXPIRED.value,
+                    "updated_at": create_time,
+                },
+                expected_statuses=[
+                    OrderAttemptStatus.RECEIVED.value,
+                    OrderAttemptStatus.PROCESSING.value,
+                ],
+                session=session,
+            )
+            raise OrderAttemptExpiredError("Order attempt has expired")
+        if attempt_status is OrderAttemptStatus.SUCCEEDED:
+            existing_order = await self.repository.find_by_idempotency_key(
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+                session=session,
+            )
+            if existing_order is None:
+                raise RuntimeError("Succeeded order attempt is missing its order")
+            return self._response_from_idempotent_order(
+                existing_order,
+                request_hash=request_hash,
+            )
+
+        await self.repository.update_order_attempt(
+            user_id=user_id,
+            idempotency_key=idempotency_key,
+            update_data={
+                "status": OrderAttemptStatus.PROCESSING.value,
+                "updated_at": create_time,
+            },
+            expected_statuses=[
+                OrderAttemptStatus.RECEIVED.value,
+                OrderAttemptStatus.PROCESSING.value,
+            ],
+            session=session,
+        )
 
         async def create_in_transaction(session):
             prepared = await self._prepare_order(
@@ -214,8 +320,11 @@ class OrderService:
 
         try:
             if session is None:
-                return await self.repository.run_in_transaction(create_in_transaction)
-            return await create_in_transaction(session)
+                result = await self.repository.run_in_transaction(
+                    create_in_transaction
+                )
+            else:
+                result = await create_in_transaction(session)
         except OrderUniquenessConflictError as exc:
             if session is not None:
                 # The outer write-command transaction must abort before any
@@ -225,25 +334,53 @@ class OrderService:
                 raise
             # 两个相同幂等键可能同时通过事务外的快速查询。数据库唯一
             # 索引决定唯一赢家；失败方读取赢家已经提交的订单并复用结果。
-            if session is None:
-                existing_order = await self.repository.find_by_idempotency_key(
-                    user_id=user_id,
-                    idempotency_key=idempotency_key,
-                )
-            else:
-                existing_order = await self.repository.find_by_idempotency_key(
-                    user_id=user_id,
-                    idempotency_key=idempotency_key,
-                    session=session,
-                )
+            existing_order = await self.repository.find_by_idempotency_key(
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+                session=session,
+            )
             if existing_order is None:
                 raise RuntimeError(
                     "Order uniqueness conflict could not be resolved"
                 ) from exc
-            return self._response_from_idempotent_order(
+            result = self._response_from_idempotent_order(
                 existing_order,
                 request_hash=request_hash,
             )
+        except ORDER_ATTEMPT_FAILURES as exc:
+            failure_code = ORDER_ATTEMPT_FAILURE_CODES[type(exc)]
+            await self.repository.update_order_attempt(
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+                update_data={
+                    "status": OrderAttemptStatus.FAILED.value,
+                    "failure_code": failure_code,
+                    "updated_at": self.now_provider(),
+                },
+                expected_statuses=[
+                    OrderAttemptStatus.RECEIVED.value,
+                    OrderAttemptStatus.PROCESSING.value,
+                ],
+                session=session,
+            )
+            raise
+
+        await self.repository.update_order_attempt(
+            user_id=user_id,
+            idempotency_key=idempotency_key,
+            update_data={
+                "status": OrderAttemptStatus.SUCCEEDED.value,
+                "order_id": result.order_id,
+                "failure_code": None,
+                "updated_at": self.now_provider(),
+            },
+            expected_statuses=[
+                OrderAttemptStatus.RECEIVED.value,
+                OrderAttemptStatus.PROCESSING.value,
+            ],
+            session=session,
+        )
+        return result
 
     async def preview_order(
         self,
@@ -559,6 +696,70 @@ class OrderService:
             status="success",
             message="Order queried successfully",
             order=OrderQueryByIdData(**result),
+        )
+
+    async def query_order_attempt(
+        self,
+        idempotency_key: str,
+        user_id: str,
+    ) -> OrderAttemptResult:
+        order = await self.repository.find_by_idempotency_key(
+            user_id=user_id,
+            idempotency_key=idempotency_key,
+        )
+        if order is not None:
+            await self.repository.update_order_attempt(
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+                update_data={
+                    "status": OrderAttemptStatus.SUCCEEDED.value,
+                    "order_id": order["order_id"],
+                    "failure_code": None,
+                    "updated_at": self.now_provider(),
+                },
+            )
+            return OrderAttemptResult(
+                status=OrderAttemptStatus.SUCCEEDED,
+                order=OrderQueryByIdData(**order),
+            )
+
+        attempt = await self.repository.find_order_attempt(
+            user_id=user_id,
+            idempotency_key=idempotency_key,
+        )
+        if attempt is None:
+            return OrderAttemptResult(status=OrderAttemptStatus.NOT_FOUND)
+
+        attempt_status = OrderAttemptStatus(attempt["status"])
+        expires_at = _as_utc(attempt.get("expires_at"))
+        now = self.now_provider()
+        if (
+            attempt_status
+            in {OrderAttemptStatus.RECEIVED, OrderAttemptStatus.PROCESSING}
+            and expires_at is not None
+            and expires_at <= now
+        ):
+            await self.repository.update_order_attempt(
+                user_id=user_id,
+                idempotency_key=idempotency_key,
+                update_data={
+                    "status": OrderAttemptStatus.EXPIRED.value,
+                    "updated_at": now,
+                },
+                expected_statuses=[
+                    OrderAttemptStatus.RECEIVED.value,
+                    OrderAttemptStatus.PROCESSING.value,
+                ],
+            )
+            attempt_status = OrderAttemptStatus.EXPIRED
+
+        if attempt_status is OrderAttemptStatus.SUCCEEDED:
+            raise RuntimeError("Succeeded order attempt is missing its order")
+
+        return OrderAttemptResult(
+            status=attempt_status,
+            failure_code=attempt.get("failure_code"),
+            expires_at=expires_at,
         )
 
     async def query_order_status(self, order_id: str, user_id: str):

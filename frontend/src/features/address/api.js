@@ -1,7 +1,7 @@
 import { http } from '../../shared/api/http.js';
 
 export const addressApi = {
-  list: () => http('/addresses'),
+  list: (options = {}) => http('/addresses', options),
   create: (payload) =>
     http('/addresses', { method: 'POST', body: JSON.stringify(payload) }),
   update: (id, payload) =>

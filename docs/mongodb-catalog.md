@@ -2,6 +2,26 @@
 
 第二阶段不会自动生成目录数据。订单页只读取 `smart_customer_service` 数据库中的 `shops` 和 `products` 集合；应用启动时会创建唯一索引。
 
+## 真实门店演示目录
+
+项目提供两家已核验上海门店及其代表商品的幂等种子脚本。脚本会新增或
+更新自身管理的记录，不会删除集合中的其他数据，也不会在重复运行时重置
+已有商品库存：
+
+```powershell
+backend\.venv\Scripts\python.exe scripts\seed_real_catalog.py
+```
+
+仅校验数据而不写入 MongoDB：
+
+```powershell
+backend\.venv\Scripts\python.exe scripts\seed_real_catalog.py --dry-run
+```
+
+门店地址和坐标来自品牌门店页，商品与价格来自近期公开目录快照。起送额、
+配送费、配送半径、库存和上下架状态是本项目的本地业务配置，不代表品牌或
+第三方配送平台的实时承诺。来源及核验日期记录在脚本顶部。
+
 ## shops
 
 `shop_id` 必须唯一。营业时间的 `day_of_week` 使用 `0` 表示星期一、`6` 表示星期日；跨午夜可令 `close_time` 小于 `open_time`。

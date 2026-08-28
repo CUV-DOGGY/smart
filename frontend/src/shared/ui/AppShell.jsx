@@ -25,7 +25,8 @@ export function AppShell() {
         <nav>
           <NavLink to="/chat">💬 智能客服</NavLink>
           <NavLink to="/addresses">⌖ 收货地址</NavLink>
-          <NavLink to="/orders">▤ 我的订单</NavLink>
+          <NavLink to="/orders/shops">▤ 店铺点餐</NavLink>
+          <NavLink to="/orders/history">◷ 历史订单</NavLink>
         </nav>
         <div className="nav-user">
           <span className="avatar">

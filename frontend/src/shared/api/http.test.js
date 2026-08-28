@@ -36,4 +36,39 @@ describe('http', () => {
       code: 'NETWORK_ERROR',
     });
   });
+
+  it('distinguishes a client timeout from a generic network error', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_, { signal }) =>
+        new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
+      ),
+    );
+
+    await expect(http('/test', { timeoutMs: 5 })).rejects.toMatchObject({
+      code: 'REQUEST_TIMEOUT',
+    });
+  });
+
+  it('exposes Retry-After to feature-specific retry policies', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ code: 'DATABASE_UNAVAILABLE' }), {
+          status: 503,
+          headers: {
+            'Content-Type': 'application/json',
+            'Retry-After': '2',
+          },
+        }),
+      ),
+    );
+
+    await expect(http('/test')).rejects.toMatchObject({
+      status: 503,
+      retryAfterMs: 2000,
+    });
+  });
 });

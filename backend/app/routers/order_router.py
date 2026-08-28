@@ -1,11 +1,12 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Path, Query, status
+from fastapi import APIRouter, Depends, Header, Path, Query, Response, status
 
 from app.core.api_errors import ApiError
 from app.dependencies.auth import get_current_user_id
 from app.dependencies.services import get_order_service
 from app.schemas.order import (
+    OrderAttemptResult,
     OrderCancelResult,
     OrderCreate,
     OrderCreateResult,
@@ -22,6 +23,8 @@ from app.services.order_service import (
     InventoryReservationError,
     MinimumOrderAmountError,
     OrderAddressNotFoundError,
+    OrderAttemptExpiredError,
+    OrderAttemptFailedError,
     OrderNotFoundError,
     OrderService,
     OrderStateConflictError,
@@ -77,6 +80,18 @@ async def create_order(
         raise _api_error(409, "OUTSIDE_DELIVERY_AREA", "收货地址超出配送范围") from exc
     except IdempotencyKeyConflictError as exc:
         raise _api_error(409, "IDEMPOTENCY_KEY_CONFLICT", "幂等键已用于其他订单") from exc
+    except OrderAttemptFailedError as exc:
+        raise _api_error(
+            409,
+            exc.failure_code,
+            "这次下单已明确失败，请重新提交",
+        ) from exc
+    except OrderAttemptExpiredError as exc:
+        raise _api_error(
+            409,
+            "ORDER_ATTEMPT_EXPIRED",
+            "这次下单请求已过期，请重新提交",
+        ) from exc
     except ShopUnavailableError as exc:
         raise _api_error(409, "SHOP_UNAVAILABLE", "店铺当前不可接单") from exc
     except ShopClosedError as exc:
@@ -112,6 +127,31 @@ async def list_orders(
     return OrderHistoryPage(
         items=items,
         next_cursor=next_cursor,
+    )
+
+
+@router.get(
+    "/by-idempotency-key",
+    response_model=OrderAttemptResult,
+)
+async def get_order_by_idempotency_key(
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=8,
+            max_length=128,
+            pattern=r"^[A-Za-z0-9._:-]+$",
+        ),
+    ],
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    http_response: Response,
+    service: OrderService = Depends(get_order_service),
+) -> OrderAttemptResult:
+    http_response.headers["Cache-Control"] = "no-store"
+    return await service.query_order_attempt(
+        idempotency_key,
+        user_id,
     )
 
 

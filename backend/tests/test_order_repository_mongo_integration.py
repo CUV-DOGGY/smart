@@ -2,7 +2,7 @@ import os
 import unittest
 from uuid import uuid4
 
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.constants.order_status import OrderStatus
 from app.repositories.order_repository import OrderRepository
@@ -27,7 +27,7 @@ class MongoOrderRepositoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
         if not TEST_MONGODB_DB_NAME.endswith("_test"):
             self.fail("integration database name must end with '_test'")
 
-        self.client = AsyncIOMotorClient(
+        self.client = AsyncMongoClient(
             TEST_MONGODB_URL,
             serverSelectionTimeoutMS=2_000,
         )
@@ -54,7 +54,7 @@ class MongoOrderRepositoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 "user_id": self.user_id,
             }
         )
-        self.client.close()
+        await self.client.close()
 
     async def test_stale_cancel_does_not_overwrite_delivery(self):
         observed_document = await self.orders.find_one(
@@ -102,6 +102,21 @@ class MongoOrderRepositoryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             final_document["order_status"],
             OrderStatus.DELIVERING.value,
         )
+
+    async def test_transaction_uses_pymongo_async_session(self):
+        async def read_order(session):
+            return await self.orders.find_one(
+                {
+                    "order_id": self.order_id,
+                    "user_id": self.user_id,
+                },
+                session=session,
+            )
+
+        document = await self.repository.run_in_transaction(read_order)
+
+        self.assertIsNotNone(document)
+        self.assertEqual(document["order_id"], self.order_id)
 
 
 if __name__ == "__main__":

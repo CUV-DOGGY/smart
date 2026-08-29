@@ -1,7 +1,5 @@
-from motor.motor_asyncio import (
-    AsyncIOMotorClientSession,
-    AsyncIOMotorDatabase,
-)
+from pymongo.asynchronous.client_session import AsyncClientSession
+from pymongo.asynchronous.database import AsyncDatabase
 
 from app.schemas.product import Product
 from app.core.database_errors import (
@@ -23,7 +21,7 @@ _PRODUCT_MODEL_PROJECTION: dict[str, int] = {
 
 
 class ProductRepository:
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         self.product_collection = db["products"]
 
     async def ensure_indexes(self) -> None:
@@ -62,7 +60,7 @@ class ProductRepository:
         self,
         shop_id: str,
         food_ids: list[str],
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ) -> list[Product]:
         try:
             documents = await self.product_collection.find(
@@ -84,7 +82,7 @@ class ProductRepository:
         *,
         product: Product,
         quantity: int,
-        session: AsyncIOMotorClientSession,
+        session: AsyncClientSession,
     ) -> bool:
         try:
             result = await self.product_collection.update_one(

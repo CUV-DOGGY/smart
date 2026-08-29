@@ -1,7 +1,5 @@
-from motor.motor_asyncio import (
-    AsyncIOMotorClientSession,
-    AsyncIOMotorDatabase,
-)
+from pymongo.asynchronous.client_session import AsyncClientSession
+from pymongo.asynchronous.database import AsyncDatabase
 
 from app.schemas.shop import Shop
 from app.core.database_errors import (
@@ -11,7 +9,7 @@ from app.core.database_errors import (
 
 
 class ShopRepository:
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         self.shop_collection = db["shops"]
 
     async def ensure_indexes(self) -> None:
@@ -43,7 +41,7 @@ class ShopRepository:
     async def find_by_shop_id(
         self,
         shop_id: str,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ) -> Shop | None:
         try:
             document = await self.shop_collection.find_one(

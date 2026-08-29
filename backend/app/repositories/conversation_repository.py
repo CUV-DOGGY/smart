@@ -4,7 +4,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError
 
@@ -15,7 +15,7 @@ from app.core.database_errors import (
 
 
 class ConversationRepository:
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         self.conversations = db["conversations"]
         self.messages = db["conversation_messages"]
 

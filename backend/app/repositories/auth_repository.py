@@ -1,10 +1,10 @@
-from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
+from pymongo.asynchronous.database import AsyncDatabase
 
 from app.ports.errors import UsernameConflictError
 
 class AuthRepository:
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         self.user_collection = db["users"]
 
     async def create_user(self, user_data: dict) -> None:

@@ -2,11 +2,9 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import TypeVar
 
-from motor.motor_asyncio import (
-    AsyncIOMotorClientSession,
-    AsyncIOMotorDatabase,
-)
 from pymongo import ReturnDocument
+from pymongo.asynchronous.client_session import AsyncClientSession
+from pymongo.asynchronous.database import AsyncDatabase
 
 from app.schemas.address import UserAddress
 
@@ -42,7 +40,7 @@ ADDRESS_PROJECTION = {
 
 
 class AddressRepository:
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         self.address_collection = db["user_addresses"]
         self.user_collection = db["users"]
 
@@ -73,11 +71,11 @@ class AddressRepository:
 
     async def run_in_transaction(
         self,
-        callback: Callable[[AsyncIOMotorClientSession], Awaitable[_T]],
+        callback: Callable[[AsyncClientSession], Awaitable[_T]],
     ) -> _T:
         client = self.address_collection.database.client
         try:
-            async with await client.start_session() as session:
+            async with client.start_session() as session:
                 return await session.with_transaction(callback)
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(
@@ -88,7 +86,7 @@ class AddressRepository:
         self,
         *,
         user_id: str,
-        session: AsyncIOMotorClientSession,
+        session: AsyncClientSession,
     ) -> None:
         result = await self.user_collection.update_one(
             {"user_id": user_id},
@@ -102,7 +100,7 @@ class AddressRepository:
         self,
         *,
         user_id: str,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ) -> int:
         return await self.address_collection.count_documents(
             {
@@ -116,7 +114,7 @@ class AddressRepository:
         self,
         address_data: dict,
         *,
-        session: AsyncIOMotorClientSession,
+        session: AsyncClientSession,
     ) -> None:
         await self.address_collection.insert_one(
             address_data,
@@ -128,7 +126,7 @@ class AddressRepository:
         *,
         user_id: str,
         address_id: str,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ) -> UserAddress | None:
         try:
             document = await self.address_collection.find_one(
@@ -173,7 +171,7 @@ class AddressRepository:
         user_id: str,
         address_id: str,
         update_data: dict,
-        session: AsyncIOMotorClientSession,
+        session: AsyncClientSession,
     ) -> UserAddress | None:
         document = await self.address_collection.find_one_and_update(
             {
@@ -198,7 +196,7 @@ class AddressRepository:
         *,
         user_id: str,
         update_time: datetime,
-        session: AsyncIOMotorClientSession,
+        session: AsyncClientSession,
     ) -> None:
         await self.address_collection.update_many(
             {
@@ -222,7 +220,7 @@ class AddressRepository:
         user_id: str,
         address_id: str,
         update_time: datetime,
-        session: AsyncIOMotorClientSession,
+        session: AsyncClientSession,
     ) -> bool:
         result = await self.address_collection.update_one(
             {
@@ -247,7 +245,7 @@ class AddressRepository:
         user_id: str,
         address_id: str,
         update_time: datetime,
-        session: AsyncIOMotorClientSession,
+        session: AsyncClientSession,
     ) -> UserAddress | None:
         document = await self.address_collection.find_one_and_update(
             {
@@ -275,7 +273,7 @@ class AddressRepository:
         self,
         *,
         user_id: str,
-        session: AsyncIOMotorClientSession,
+        session: AsyncClientSession,
     ) -> UserAddress | None:
         document = await self.address_collection.find_one(
             {

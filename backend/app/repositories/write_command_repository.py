@@ -2,11 +2,9 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, TypeVar
 
-from motor.motor_asyncio import (
-    AsyncIOMotorClientSession,
-    AsyncIOMotorDatabase,
-)
 from pymongo import ReturnDocument
+from pymongo.asynchronous.client_session import AsyncClientSession
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import DuplicateKeyError
 
 from app.constants.write_command_status import WriteCommandStatus
@@ -20,7 +18,7 @@ _T = TypeVar("_T")
 
 
 class WriteCommandRepository:
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         self.collection = db["write_commands"]
 
     async def ensure_indexes(self) -> None:
@@ -58,11 +56,11 @@ class WriteCommandRepository:
 
     async def run_in_transaction(
         self,
-        callback: Callable[[AsyncIOMotorClientSession], Awaitable[_T]],
+        callback: Callable[[AsyncClientSession], Awaitable[_T]],
     ) -> _T:
         client = self.collection.database.client
         try:
-            async with await client.start_session() as session:
+            async with client.start_session() as session:
                 return await session.with_transaction(callback)
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(
@@ -87,7 +85,7 @@ class WriteCommandRepository:
         self,
         command_id: str,
         *,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ) -> dict[str, Any] | None:
         try:
             return await self.collection.find_one(
@@ -105,7 +103,7 @@ class WriteCommandRepository:
         *,
         command_id: str,
         user_id: str,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ) -> dict[str, Any] | None:
         try:
             return await self.collection.find_one(
@@ -310,7 +308,7 @@ class WriteCommandRepository:
         command_id: str,
         user_id: str,
         execution_token: str,
-        session: AsyncIOMotorClientSession,
+        session: AsyncClientSession,
     ) -> dict[str, Any] | None:
         try:
             return await self.collection.find_one(
@@ -337,7 +335,7 @@ class WriteCommandRepository:
         status: str,
         result: dict[str, Any],
         now: datetime,
-        session: AsyncIOMotorClientSession,
+        session: AsyncClientSession,
     ) -> dict[str, Any] | None:
         try:
             return await self.collection.find_one_and_update(

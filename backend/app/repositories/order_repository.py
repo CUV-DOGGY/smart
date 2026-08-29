@@ -5,11 +5,9 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import TypeVar
 
-from motor.motor_asyncio import (
-    AsyncIOMotorClientSession,
-    AsyncIOMotorDatabase,
-)
 from pymongo import ReturnDocument
+from pymongo.asynchronous.client_session import AsyncClientSession
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import DuplicateKeyError
 
 from app.core.database_errors import (
@@ -23,7 +21,7 @@ _T = TypeVar("_T")
 
 
 class OrderRepository:
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         self.order_collection = db["orders"]
         self.order_attempt_collection = db["order_attempts"]
 
@@ -59,11 +57,11 @@ class OrderRepository:
 
     async def run_in_transaction(
         self,
-        callback: Callable[[AsyncIOMotorClientSession], Awaitable[_T]],
+        callback: Callable[[AsyncClientSession], Awaitable[_T]],
     ) -> _T:
         client = self.order_collection.database.client
         try:
-            async with await client.start_session() as session:
+            async with client.start_session() as session:
                 return await session.with_transaction(callback)
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(
@@ -73,7 +71,7 @@ class OrderRepository:
     async def create_order(
         self,
         order_data: dict,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ):
         try:
             result = await self.order_collection.insert_one(
@@ -91,7 +89,7 @@ class OrderRepository:
         *,
         user_id: str,
         idempotency_key: str,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ) -> dict | None:
         try:
             return await self.order_collection.find_one(
@@ -110,7 +108,7 @@ class OrderRepository:
     async def create_or_get_order_attempt(
         self,
         attempt_data: dict,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ) -> dict:
         filters = {
             "user_id": attempt_data["user_id"],
@@ -153,7 +151,7 @@ class OrderRepository:
         *,
         user_id: str,
         idempotency_key: str,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ) -> dict | None:
         try:
             return await self.order_attempt_collection.find_one(
@@ -176,7 +174,7 @@ class OrderRepository:
         idempotency_key: str,
         update_data: dict,
         expected_statuses: list[str] | None = None,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ) -> dict | None:
         filters: dict = {
             "user_id": user_id,
@@ -211,7 +209,7 @@ class OrderRepository:
         self,
         order_id: str,
         user_id: str,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ):
         try:
             return await self.order_collection.find_one(
@@ -307,7 +305,7 @@ class OrderRepository:
         user_id: str,
         expected_status: str,
         target_status: str,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ) -> bool:
         try:
             result = await self.order_collection.update_one(

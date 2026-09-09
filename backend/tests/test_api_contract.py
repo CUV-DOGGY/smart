@@ -77,7 +77,10 @@ class LocalDevelopmentCorsTests(unittest.TestCase):
                 headers={
                     "Origin": "http://127.0.0.1:5173",
                     "Access-Control-Request-Method": "POST",
-                    "Access-Control-Request-Headers": "content-type",
+                    "Access-Control-Request-Headers": (
+                        "content-type,authorization,traceparent,tracestate,"
+                        "baggage,idempotency-key"
+                    ),
                 },
             )
 
@@ -85,6 +88,39 @@ class LocalDevelopmentCorsTests(unittest.TestCase):
         self.assertEqual(
             response.headers["Access-Control-Allow-Origin"],
             "http://127.0.0.1:5173",
+        )
+        allowed_headers = response.headers["Access-Control-Allow-Headers"].lower()
+        for header in (
+            "traceparent",
+            "tracestate",
+            "baggage",
+            "authorization",
+            "idempotency-key",
+        ):
+            self.assertIn(header, allowed_headers)
+
+    def test_request_id_is_exposed_to_browser_javascript(self):
+        app = FastAPI()
+        setup_middleware(app)
+
+        @app.get("/health")
+        async def health():
+            return {"ok": True}
+
+        with TestClient(app) as client:
+            response = client.get(
+                "/health",
+                headers={"Origin": "http://127.0.0.1:5173"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "x-request-id",
+            response.headers["Access-Control-Expose-Headers"].lower(),
+        )
+        self.assertIn(
+            "retry-after",
+            response.headers["Access-Control-Expose-Headers"].lower(),
         )
 
 

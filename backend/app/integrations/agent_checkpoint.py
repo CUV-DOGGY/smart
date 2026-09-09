@@ -10,7 +10,8 @@ def create_agent_checkpointer(
 
     langgraph-checkpoint-mongodb 0.4 exposes async saver methods backed by a
     PyMongo client and runs blocking operations in an executor.  Keeping this
-    client separate from Motor also gives the integration a clear lifecycle.
+    client separate from the application's async PyMongo client also gives the
+    integration a clear lifecycle.
     """
     client = MongoClient(mongodb_url)
     return MongoDBSaver(

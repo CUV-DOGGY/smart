@@ -2,9 +2,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path
 
+from app.core.api_errors import ApiError
 from app.dependencies.services import get_catalog_service
 from app.schemas.catalog import ProductListResponse, ShopListResponse
-from app.services.catalog_service import CatalogService
+from app.schemas.shop import Shop
+from app.services.catalog_service import CatalogService, CatalogShopNotFoundError
 
 
 router = APIRouter(prefix="/catalog", tags=["店铺与商品"])
@@ -15,6 +17,21 @@ async def list_shops(
     service: Annotated[CatalogService, Depends(get_catalog_service)],
 ) -> ShopListResponse:
     return await service.list_shops()
+
+
+@router.get("/shops/{shop_id}", response_model=Shop)
+async def get_shop(
+    shop_id: Annotated[str, Path(min_length=1, max_length=64)],
+    service: Annotated[CatalogService, Depends(get_catalog_service)],
+) -> Shop:
+    try:
+        return await service.get_shop(shop_id)
+    except CatalogShopNotFoundError as exc:
+        raise ApiError(
+            status_code=404,
+            code="SHOP_NOT_FOUND",
+            message="店铺不存在",
+        ) from exc
 
 
 @router.get(

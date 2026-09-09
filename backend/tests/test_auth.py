@@ -401,6 +401,7 @@ class AuthBodyLimitTests(unittest.TestCase):
 class LifespanTests(unittest.IsolatedAsyncioTestCase):
     async def test_mongo_is_closed_when_startup_fails_after_connection(self):
         mongo_client = MagicMock()
+        mongo_client.close = AsyncMock()
 
         with (
             patch(
@@ -416,7 +417,7 @@ class LifespanTests(unittest.IsolatedAsyncioTestCase):
                 async with lifespan(FastAPI()):
                     pass
 
-        mongo_client.close.assert_called_once_with()
+        mongo_client.close.assert_awaited_once_with()
 
 
 class TrustedIdentitySchemaTests(unittest.TestCase):

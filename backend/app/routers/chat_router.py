@@ -3,7 +3,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
 from app.agents.runner import (
@@ -12,6 +12,11 @@ from app.agents.runner import (
 )
 from app.agents.runtime import AgentRuntimeContext
 from app.core.api_errors import ApiError
+from app.observability.context import (
+    bind_run_id,
+    reset_run_id,
+    set_current_span_run_id,
+)
 from app.dependencies.auth import get_current_user_id
 from app.dependencies.services import (
     get_agent_chat_service,
@@ -48,6 +53,8 @@ async def stream_chat(
         user_id=user_id,
         llm=service.runtime_context.llm,
         tools=service.runtime_context.tools,
+        command_service=service.runtime_context.command_service,
+        conversation_id=conversation_id,
     )
     lock_context = service.run_lock.acquire(user_id, conversation_id)
     try:
@@ -84,11 +91,22 @@ async def resume_chat(
     request: Request,
     user_id: Annotated[str, Depends(get_current_user_id)],
     service: Annotated[AgentChatService, Depends(get_agent_chat_service)],
+    idempotency_key: Annotated[
+        str,
+        Header(
+            alias="Idempotency-Key",
+            min_length=8,
+            max_length=128,
+            pattern=r"^[A-Za-z0-9._:-]+$",
+        ),
+    ],
 ) -> StreamingResponse:
     service.runtime_context = AgentRuntimeContext(
         user_id=user_id,
         llm=service.runtime_context.llm,
         tools=service.runtime_context.tools,
+        command_service=service.runtime_context.command_service,
+        conversation_id=payload.conversation_id,
     )
     await _ensure_resume(service, payload, user_id)
     lock_context = service.run_lock.acquire(user_id, payload.conversation_id)
@@ -109,6 +127,7 @@ async def resume_chat(
             conversation_id=payload.conversation_id,
             interrupt_id=payload.interrupt_id,
             decision=payload.decision,
+            idempotency_key=idempotency_key,
             is_disconnected=request.is_disconnected,
         ),
         lock_context,
@@ -217,6 +236,8 @@ def _streaming_response(
     run_id = str(uuid.uuid4())
 
     async def events() -> AsyncIterator[str]:
+        run_id_token = bind_run_id(run_id)
+        set_current_span_run_id(run_id)
         try:
             yield _sse({"type": "meta", "conversation_id": conversation_id, "run_id": run_id})
             async for event in source:
@@ -224,7 +245,10 @@ def _streaming_response(
                     event["request_id"] = request_id
                 yield _sse(event)
         finally:
-            await lock_context.__aexit__(None, None, None)
+            try:
+                await lock_context.__aexit__(None, None, None)
+            finally:
+                reset_run_id(run_id_token)
 
     return StreamingResponse(
         events(),

@@ -3,7 +3,7 @@ import unittest
 
 import httpx
 from langchain_core.messages import HumanMessage, SystemMessage
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.config import settings
 from app.integrations.llm import create_llm
@@ -23,7 +23,7 @@ RUN_INTEGRATION = os.getenv("RUN_LLM_INTEGRATION") == "1"
 class LiveLlmIntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_deepseek_requests_and_executes_one_read_only_service_tool(self):
         self.assertEqual(settings.MODEL_NAME, "deepseek-v4-flash")
-        client = AsyncIOMotorClient(settings.MONGODB_URL)
+        client = AsyncMongoClient(settings.MONGODB_URL)
         try:
             catalog = CatalogService(
                 ShopRepository(client[settings.MONGODB_DB_NAME]),
@@ -37,7 +37,6 @@ class LiveLlmIntegrationTests(unittest.IsolatedAsyncioTestCase):
             async with httpx.AsyncClient(trust_env=False) as http_client:
                 model = create_llm(http_async_client=http_client).bind_tools(
                     [SPECS["list_shops"].openai_schema()],
-                    tool_choice="list_shops",
                 )
                 response = await model.ainvoke([
                     SystemMessage(content="必须调用 list_shops，只允许执行只读查询。"),
@@ -55,7 +54,7 @@ class LiveLlmIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result["ok"])
             self.assertIn("items", result)
         finally:
-            client.close()
+            await client.close()
 
 
 if __name__ == "__main__":

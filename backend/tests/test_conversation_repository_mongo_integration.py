@@ -1,7 +1,7 @@
 import os
 import unittest
 
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 from app.repositories.conversation_repository import ConversationRepository
 
@@ -15,7 +15,7 @@ class ConversationRepositoryMongoIntegrationTests(unittest.IsolatedAsyncioTestCa
         database_name = os.environ["TEST_MONGODB_DB_NAME"]
         if not database_name.endswith("_test"):
             self.fail("integration database name must end with _test")
-        self.client = AsyncIOMotorClient(os.environ["TEST_MONGODB_URL"])
+        self.client = AsyncMongoClient(os.environ["TEST_MONGODB_URL"])
         self.database = self.client[database_name]
         self.repository = ConversationRepository(self.database)
         await self.repository.ensure_indexes()
@@ -25,7 +25,7 @@ class ConversationRepositoryMongoIntegrationTests(unittest.IsolatedAsyncioTestCa
     async def asyncTearDown(self):
         await self.database.conversations.delete_many({"user_id": {"$in": ["chat-user-a", "chat-user-b"]}})
         await self.database.conversation_messages.delete_many({"user_id": {"$in": ["chat-user-a", "chat-user-b"]}})
-        self.client.close()
+        await self.client.close()
 
     async def test_conversation_is_isolated_listed_and_deleted(self):
         conversation_id = await self.repository.create_conversation("chat-user-a", "测试会话")

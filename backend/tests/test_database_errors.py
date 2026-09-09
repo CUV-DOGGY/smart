@@ -39,7 +39,7 @@ class AddressRepositoryDatabaseErrorTests(unittest.IsolatedAsyncioTestCase):
     async def test_transaction_preserves_mongo_failure_as_cause(self):
         repository, collection = self.make_repository()
         mongo_error = ServerSelectionTimeoutError("server unavailable")
-        collection.database.client.start_session = AsyncMock(
+        collection.database.client.start_session = MagicMock(
             side_effect=mongo_error
         )
 
@@ -72,7 +72,7 @@ class OrderRepositoryDatabaseErrorTests(unittest.IsolatedAsyncioTestCase):
     async def test_transaction_preserves_mongo_failure_as_cause(self):
         repository, collection = self.make_repository()
         mongo_error = ServerSelectionTimeoutError("server unavailable")
-        collection.database.client.start_session = AsyncMock(
+        collection.database.client.start_session = MagicMock(
             side_effect=mongo_error
         )
 

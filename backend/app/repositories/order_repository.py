@@ -5,10 +5,9 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import TypeVar
 
-from motor.motor_asyncio import (
-    AsyncIOMotorClientSession,
-    AsyncIOMotorDatabase,
-)
+from pymongo import ReturnDocument
+from pymongo.asynchronous.client_session import AsyncClientSession
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import DuplicateKeyError
 
 from app.core.database_errors import (
@@ -22,8 +21,9 @@ _T = TypeVar("_T")
 
 
 class OrderRepository:
-    def __init__(self, db: AsyncIOMotorDatabase):
+    def __init__(self, db: AsyncDatabase):
         self.order_collection = db["orders"]
+        self.order_attempt_collection = db["order_attempts"]
 
     async def ensure_indexes(self) -> None:
         await self.order_collection.create_index(
@@ -42,14 +42,26 @@ class OrderRepository:
             },
             name="uq_user_order_idempotency_key",
         )
+        await self.order_attempt_collection.create_index(
+            [
+                ("user_id", 1),
+                ("idempotency_key", 1),
+            ],
+            unique=True,
+            name="uq_user_order_attempt_idempotency_key",
+        )
+        await self.order_attempt_collection.create_index(
+            [("expires_at", 1)],
+            name="ix_order_attempt_expires_at",
+        )
 
     async def run_in_transaction(
         self,
-        callback: Callable[[AsyncIOMotorClientSession], Awaitable[_T]],
+        callback: Callable[[AsyncClientSession], Awaitable[_T]],
     ) -> _T:
         client = self.order_collection.database.client
         try:
-            async with await client.start_session() as session:
+            async with client.start_session() as session:
                 return await session.with_transaction(callback)
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(
@@ -59,7 +71,7 @@ class OrderRepository:
     async def create_order(
         self,
         order_data: dict,
-        session: AsyncIOMotorClientSession | None = None,
+        session: AsyncClientSession | None = None,
     ):
         try:
             result = await self.order_collection.insert_one(
@@ -77,6 +89,7 @@ class OrderRepository:
         *,
         user_id: str,
         idempotency_key: str,
+        session: AsyncClientSession | None = None,
     ) -> dict | None:
         try:
             return await self.order_collection.find_one(
@@ -85,10 +98,101 @@ class OrderRepository:
                     "idempotency_key": idempotency_key,
                 },
                 {"_id": 0},
+                session=session,
             )
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(
                 "MongoDB order lookup is temporarily unavailable"
+            ) from exc
+
+    async def create_or_get_order_attempt(
+        self,
+        attempt_data: dict,
+        session: AsyncClientSession | None = None,
+    ) -> dict:
+        filters = {
+            "user_id": attempt_data["user_id"],
+            "idempotency_key": attempt_data["idempotency_key"],
+        }
+        try:
+            document = await self.order_attempt_collection.find_one_and_update(
+                filters,
+                {"$setOnInsert": attempt_data},
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+                projection={"_id": 0},
+                session=session,
+            )
+        except DuplicateKeyError as exc:
+            if session is not None:
+                raise OrderUniquenessConflictError(
+                    "Order attempt unique identifier already exists"
+                ) from exc
+            try:
+                document = await self.order_attempt_collection.find_one(
+                    filters,
+                    {"_id": 0},
+                    session=session,
+                )
+            except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
+                raise DatabaseUnavailableError(
+                    "MongoDB order attempt is temporarily unavailable"
+                ) from exc
+        except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
+            raise DatabaseUnavailableError(
+                "MongoDB order attempt is temporarily unavailable"
+            ) from exc
+        if document is None:
+            raise RuntimeError("Order attempt could not be created or loaded")
+        return document
+
+    async def find_order_attempt(
+        self,
+        *,
+        user_id: str,
+        idempotency_key: str,
+        session: AsyncClientSession | None = None,
+    ) -> dict | None:
+        try:
+            return await self.order_attempt_collection.find_one(
+                {
+                    "user_id": user_id,
+                    "idempotency_key": idempotency_key,
+                },
+                {"_id": 0},
+                session=session,
+            )
+        except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
+            raise DatabaseUnavailableError(
+                "MongoDB order attempt lookup is temporarily unavailable"
+            ) from exc
+
+    async def update_order_attempt(
+        self,
+        *,
+        user_id: str,
+        idempotency_key: str,
+        update_data: dict,
+        expected_statuses: list[str] | None = None,
+        session: AsyncClientSession | None = None,
+    ) -> dict | None:
+        filters: dict = {
+            "user_id": user_id,
+            "idempotency_key": idempotency_key,
+        }
+        if expected_statuses:
+            filters["status"] = {"$in": expected_statuses}
+        try:
+            return await self.order_attempt_collection.find_one_and_update(
+                filters,
+                {"$set": update_data},
+                return_document=ReturnDocument.AFTER,
+                projection={"_id": 0},
+                session=session,
+            )
+        except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
+            raise DatabaseUnavailableError(
+                "MongoDB order attempt update is temporarily unavailable"
             ) from exc
    
     async def query_order_by_id(self, order_id: str,user_id:str):
@@ -101,7 +205,12 @@ class OrderRepository:
             ) from exc
         return result
     
-    async def query_order_status(self, order_id: str, user_id: str):
+    async def query_order_status(
+        self,
+        order_id: str,
+        user_id: str,
+        session: AsyncClientSession | None = None,
+    ):
         try:
             return await self.order_collection.find_one(
                 {
@@ -109,6 +218,7 @@ class OrderRepository:
                     "user_id": user_id,
                 },
                 {"_id": 0, "order_status": 1},
+                session=session,
             )
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(
@@ -195,6 +305,7 @@ class OrderRepository:
         user_id: str,
         expected_status: str,
         target_status: str,
+        session: AsyncClientSession | None = None,
     ) -> bool:
         try:
             result = await self.order_collection.update_one(
@@ -204,6 +315,7 @@ class OrderRepository:
                     "order_status": expected_status,
                 },
                 {"$set": {"order_status": target_status}},
+                session=session,
             )
         except MONGO_UNAVAILABLE_EXCEPTIONS as exc:
             raise DatabaseUnavailableError(

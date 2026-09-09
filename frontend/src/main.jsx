@@ -4,7 +4,10 @@ import { Provider } from 'react-redux';
 
 import App from './App.jsx';
 import { store } from './app/store.js';
+import { initializeBrowserObservability } from './shared/observability/index.js';
 import './styles.css';
+
+initializeBrowserObservability();
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

@@ -1,3 +1,5 @@
+from enum import Enum
+
 from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Literal
 from datetime import datetime
@@ -68,6 +70,20 @@ class OrderConfirmationPreview(BaseModel):
     items: List[OrderConfirmationItem]
     goods_amount: float = Field(ge=0, allow_inf_nan=False)
     delivery_fee: float = Field(ge=0, allow_inf_nan=False)
+    total_price: float = Field(ge=0, allow_inf_nan=False)
+    currency: Literal["CNY"] = "CNY"
+
+
+class OrderCancellationConfirmationPreview(BaseModel):
+    """Read-only order snapshot shown before a cancellation is approved."""
+
+    kind: Literal["order_cancellation"] = "order_cancellation"
+    order_id: str
+    shop_id: str
+    shop_name: str
+    items: List[OrderConfirmationItem]
+    current_status: OrderStatus
+    create_time: datetime
     total_price: float = Field(ge=0, allow_inf_nan=False)
     currency: Literal["CNY"] = "CNY"
 
@@ -148,3 +164,19 @@ class OrderHistoryPage(BaseModel):
 class OrderCancelResult(BaseModel):
     order_id: str
     order_status: OrderStatus
+
+
+class OrderAttemptStatus(str, Enum):
+    NOT_FOUND = "not_found"
+    RECEIVED = "received"
+    PROCESSING = "processing"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+class OrderAttemptResult(BaseModel):
+    status: OrderAttemptStatus
+    order: OrderQueryByIdData | None = None
+    failure_code: str | None = None
+    expires_at: datetime | None = None

@@ -25,7 +25,9 @@ export function LoginPage() {
       tokenStorage.set(token.access_token);
       const user = await authApi.me();
       dispatch(authenticated(user));
-      const target = location.state?.from?.startsWith('/') ? location.state.from : '/chat';
+      const target = location.state?.from?.startsWith('/')
+        ? location.state.from
+        : '/chat';
       navigate(target, { replace: true });
     } catch (requestError) {
       tokenStorage.clear();
@@ -43,12 +45,37 @@ export function LoginPage() {
         <h1>欢迎回来</h1>
         <p className="muted">登录后管理客服会话、地址与订单</p>
         <form onSubmit={submit} className="stack-form">
-          <label>用户名<input required minLength="3" maxLength="32" autoComplete="username" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
-          <label>密码<input required minLength="8" maxLength="128" type="password" autoComplete="current-password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
+          <label>
+            用户名
+            <input
+              required
+              minLength="3"
+              maxLength="32"
+              autoComplete="username"
+              value={form.username}
+              onChange={(e) => setForm({ ...form, username: e.target.value })}
+            />
+          </label>
+          <label>
+            密码
+            <input
+              required
+              minLength="8"
+              maxLength="128"
+              type="password"
+              autoComplete="current-password"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+            />
+          </label>
           {error && <div className="alert error">{error}</div>}
-          <button className="primary" disabled={submitting}>{submitting ? '登录中…' : '登录'}</button>
+          <button className="primary" disabled={submitting}>
+            {submitting ? '登录中…' : '登录'}
+          </button>
         </form>
-        <p className="auth-link">还没有账号？<Link to="/register">立即注册</Link></p>
+        <p className="auth-link">
+          还没有账号？<Link to="/register">立即注册</Link>
+        </p>
       </section>
     </main>
   );

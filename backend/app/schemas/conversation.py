@@ -4,7 +4,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.schemas.order import OrderConfirmationPreview
+from app.schemas.order import (
+    OrderCancellationConfirmationPreview,
+    OrderConfirmationPreview,
+)
 
 
 class ChatStreamRequest(BaseModel):
@@ -24,9 +27,16 @@ class ChatResumeRequest(BaseModel):
 
 class PendingConfirmation(BaseModel):
     interrupt_id: str
+    command_id: str
     action: str
     summary: str
-    presentation: OrderConfirmationPreview | None = None
+    status: Literal["awaiting_confirmation"]
+    expires_at: datetime
+    presentation: (
+        OrderConfirmationPreview
+        | OrderCancellationConfirmationPreview
+        | None
+    ) = None
 
 
 class ConversationSummary(BaseModel):

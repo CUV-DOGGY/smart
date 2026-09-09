@@ -5,6 +5,7 @@ import httpx
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
+from app.observability import metrics as app_metrics
 from app.schemas.delivery import GeocodingResult, StructuredAddress
 
 
@@ -94,6 +95,7 @@ class AmapGeocodingService:
                 "city": address.city,
                 "output": "JSON",
             },
+            operation="geocode",
         )
         geocodes = payload.get("geocodes")
         if not isinstance(geocodes, list) or not geocodes:
@@ -152,6 +154,7 @@ class AmapGeocodingService:
                 "extensions": "base",
                 "output": "JSON",
             },
+            operation="reverse_geocode",
         )
         regeocode = payload.get("regeocode")
         if not isinstance(regeocode, dict) or not regeocode:
@@ -177,6 +180,31 @@ class AmapGeocodingService:
         return result
 
     async def _request_json(
+        self,
+        url: str,
+        params: dict[str, str],
+        *,
+        operation: str,
+    ) -> dict:
+        started_at = app_metrics.telemetry.now()
+        try:
+            payload = await self._request_json_uninstrumented(url, params)
+        except Exception as exc:
+            app_metrics.telemetry.record_amap_call(
+                app_metrics.telemetry.elapsed(started_at),
+                operation=operation,
+                outcome="failed",
+                error_type=type(exc).__name__,
+            )
+            raise
+        app_metrics.telemetry.record_amap_call(
+            app_metrics.telemetry.elapsed(started_at),
+            operation=operation,
+            outcome="succeeded",
+        )
+        return payload
+
+    async def _request_json_uninstrumented(
         self,
         url: str,
         params: dict[str, str],

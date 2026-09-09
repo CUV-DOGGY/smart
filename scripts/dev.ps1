@@ -13,9 +13,31 @@ $composeFile = Join-Path $repoRoot "infra\compose.dev.yml"
 $runtimeLogRoot = Join-Path $repoRoot ".runtime-logs"
 $localMongoUrl = "mongodb://localhost:27017/?replicaSet=rs0"
 $localRedisUrl = "redis://127.0.0.1:6380/0"
+$localOtlpEndpoint = "http://127.0.0.1:4318"
 $previousMongoUrl = [Environment]::GetEnvironmentVariable("MONGODB_URL", "Process")
 $previousRedisUrl = [Environment]::GetEnvironmentVariable("REDIS_URL", "Process")
 $previousApiUrl = [Environment]::GetEnvironmentVariable("VITE_API_BASE_URL", "Process")
+$observabilityEnvironmentNames = @(
+    "OBSERVABILITY_ENABLED",
+    "OTEL_SERVICE_NAME",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_ENVIRONMENT",
+    "OTEL_TRACE_SAMPLE_RATIO",
+    "OTEL_METRIC_EXPORT_INTERVAL",
+    "BROWSER_TELEMETRY_ENABLED",
+    "VITE_OBSERVABILITY_ENABLED",
+    "VITE_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "VITE_OTEL_SERVICE_NAME",
+    "VITE_OTEL_ENVIRONMENT",
+    "VITE_OTEL_TRACE_SAMPLE_RATIO"
+)
+$previousObservabilityEnvironment = @{}
+foreach ($name in $observabilityEnvironmentNames) {
+    $previousObservabilityEnvironment[$name] = [Environment]::GetEnvironmentVariable(
+        $name,
+        "Process"
+    )
+}
 $backendProcess = $null
 $taskkillPath = Join-Path $env:SystemRoot "System32\taskkill.exe"
 
@@ -41,8 +63,10 @@ if (-not (Test-Path -LiteralPath $dockerPath)) {
 
 & $dockerPath info *> $null
 if ($LASTEXITCODE -ne 0) { throw "Docker Desktop is not running." }
-& $dockerPath compose -f $composeFile up -d --wait redis
-if ($LASTEXITCODE -ne 0) { throw "Redis failed to start." }
+& $dockerPath compose -f $composeFile up -d --wait redis observability
+if ($LASTEXITCODE -ne 0) {
+    throw "Redis or the local observability stack failed to start."
+}
 
 $readinessCode = @"
 from pymongo import MongoClient
@@ -78,6 +102,18 @@ try {
     $env:MONGODB_URL = $localMongoUrl
     $env:REDIS_URL = $localRedisUrl
     $env:VITE_API_BASE_URL = "http://127.0.0.1:$Port"
+    $env:OBSERVABILITY_ENABLED = "true"
+    $env:OTEL_SERVICE_NAME = "smartserve-backend"
+    $env:OTEL_EXPORTER_OTLP_ENDPOINT = $localOtlpEndpoint
+    $env:OTEL_ENVIRONMENT = "development"
+    $env:OTEL_TRACE_SAMPLE_RATIO = "1.0"
+    $env:OTEL_METRIC_EXPORT_INTERVAL = "10000"
+    $env:BROWSER_TELEMETRY_ENABLED = "true"
+    $env:VITE_OBSERVABILITY_ENABLED = "true"
+    $env:VITE_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT = "/telemetry/v1/traces"
+    $env:VITE_OTEL_SERVICE_NAME = "smartserve-web"
+    $env:VITE_OTEL_ENVIRONMENT = "development"
+    $env:VITE_OTEL_TRACE_SAMPLE_RATIO = "1.0"
     $backendProcess = Start-Process -FilePath $pythonPath `
         -ArgumentList @("-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "$Port", "--reload") `
         -WorkingDirectory $backendRoot `
@@ -107,6 +143,7 @@ try {
 
     Write-Host "Backend: http://127.0.0.1:$Port/docs"
     Write-Host "Frontend: http://127.0.0.1:$FrontendPort"
+    Write-Host "Grafana: http://127.0.0.1:3000 (admin/admin)"
     Push-Location $frontendRoot
     try {
         & npm run dev -- --host 127.0.0.1 --port $FrontendPort
@@ -121,4 +158,12 @@ try {
     [Environment]::SetEnvironmentVariable("MONGODB_URL", $previousMongoUrl, "Process")
     [Environment]::SetEnvironmentVariable("REDIS_URL", $previousRedisUrl, "Process")
     [Environment]::SetEnvironmentVariable("VITE_API_BASE_URL", $previousApiUrl, "Process")
+    foreach ($name in $observabilityEnvironmentNames) {
+        $previousValue = $previousObservabilityEnvironment[$name]
+        if ($null -eq $previousValue) {
+            [Environment]::SetEnvironmentVariable($name, $null, "Process")
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $previousValue, "Process")
+        }
+    }
 }

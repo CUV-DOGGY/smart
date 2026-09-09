@@ -20,6 +20,30 @@ services:
       retries: 10
       start_period: 5s
 
+  observability:
+    image: grafana/otel-lgtm:0.30.0
+    container_name: smartserve-observability
+    restart: unless-stopped
+    environment:
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /otel-lgtm/grafana/conf/provisioning/dashboards/smartserve/smartserve-overview.json
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4317:4317"
+      - "127.0.0.1:4318:4318"
+    volumes:
+      - smartserve_observability_data:/data
+      - ./grafana/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/smartserve:ro
+      - ./grafana/provisioning/dashboards/smartserve.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/smartserve.yaml:ro
+      - ./grafana/provisioning/alerting/smartserve-alerts.yaml:/otel-lgtm/grafana/conf/provisioning/alerting/smartserve-alerts.yaml:ro
+    healthcheck:
+      test: ["CMD", "cat", "/tmp/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 10s
+
 volumes:
   smartserve_redis_data:
     name: smartserve_redis_data
+  smartserve_observability_data:
+    name: smartserve_observability_data

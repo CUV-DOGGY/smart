@@ -5,6 +5,8 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from app.observability import metrics as app_metrics
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/health", tags=["系统健康"])
@@ -15,11 +17,22 @@ async def _check_component(
     name: str,
     operation: Callable[[], Awaitable[object]],
 ) -> str:
+    started_at = app_metrics.telemetry.now()
     try:
         await asyncio.wait_for(operation(), timeout=READINESS_TIMEOUT_SECONDS)
     except Exception:
+        app_metrics.telemetry.record_readiness(
+            name,
+            ready=False,
+            duration=app_metrics.telemetry.elapsed(started_at),
+        )
         logger.warning("%s readiness check failed", name, exc_info=True)
         return "unavailable"
+    app_metrics.telemetry.record_readiness(
+        name,
+        ready=True,
+        duration=app_metrics.telemetry.elapsed(started_at),
+    )
     return "ok"
 
 

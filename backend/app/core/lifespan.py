@@ -1,9 +1,14 @@
 import logging
 from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
+
 from fastapi import FastAPI
 from motor.motor_asyncio import AsyncIOMotorClient
 
 from app.config import settings
+
+if TYPE_CHECKING:
+    from app.plugins.business_hours import BusinessHoursConfig
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +17,7 @@ logger = logging.getLogger(__name__)
 async def startup_db():
     """连接 MongoDB"""
     from app.config import settings
+
     client = AsyncIOMotorClient(settings.MONGODB_URL)
     db = client[settings.MONGODB_DB_NAME]
     return client, db
@@ -21,6 +27,7 @@ async def startup_redis():
     """连接 Redis"""
     import redis.asyncio as redis
     from app.config import settings
+
     client = redis.from_url(
         settings.REDIS_URL,
         decode_responses=True,
@@ -39,7 +46,43 @@ async def startup_redis():
 def create_llm():
     """创建 LLM 实例"""
     from app.integrations.llm import create_llm as _create_llm
+
     return _create_llm()
+
+
+async def startup_plugins(
+    business_hours_config: "BusinessHoursConfig | None" = None,
+):
+    """创建并启动应用插件"""
+    from app.plugins import (
+        PluginContext,
+        PluginManager,
+        PluginToolRegistry,
+    )
+    from app.plugins.business_hours import BusinessHoursConfig, BusinessHoursPlugin
+
+    config = business_hours_config or BusinessHoursConfig(
+        timezone=settings.BUSINESS_HOURS_TIMEZONE,
+        business_days=tuple(settings.BUSINESS_HOURS_DAYS),
+        open_time=settings.BUSINESS_HOURS_OPEN_TIME,
+        close_time=settings.BUSINESS_HOURS_CLOSE_TIME,
+    )
+
+    plugin_tools = PluginToolRegistry()
+    plugin_manager = PluginManager(
+        [
+            BusinessHoursPlugin(config),
+        ]
+    )
+
+    await plugin_manager.start(
+        PluginContext(
+            logger=logger,
+            tools=plugin_tools,
+        )
+    )
+
+    return plugin_manager, plugin_tools
 
 
 # ==================== 关闭时清理 ====================
@@ -55,6 +98,12 @@ async def shutdown_redis(redis_client):
         await redis_client.aclose()
 
 
+async def shutdown_plugins(plugin_manager):
+    """按插件管理器记录的逆序停止插件"""
+    if plugin_manager:
+        await plugin_manager.stop()
+
+
 # ==================== Lifespan ====================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -64,6 +113,8 @@ async def lifespan(app: FastAPI):
     mongo_client = None
     redis_client = None
     checkpointer = None
+    plugin_manager = None
+    plugin_tools = None
 
     try:
         # 1. 连接 MongoDB
@@ -80,6 +131,7 @@ async def lifespan(app: FastAPI):
         from app.repositories.conversation_repository import ConversationRepository
         from app.repositories.product_repository import ProductRepository
         from app.repositories.shop_repository import ShopRepository
+
         await AuthRepository(db).ensure_indexes()
         await AddressRepository(db).ensure_indexes()
         await OrderRepository(db).ensure_indexes()
@@ -96,6 +148,7 @@ async def lifespan(app: FastAPI):
 
         # 3. 启动时生成固定假哈希。
         from app.core.security import initialize_password_security
+
         await initialize_password_security()
         logger.info("密码安全组件初始化成功")
 
@@ -121,6 +174,14 @@ async def lifespan(app: FastAPI):
             lease_seconds=settings.AGENT_LOCK_LEASE_SECONDS,
         )
         logger.info("LangGraph Agent 初始化成功")
+        # 6. 在主体依赖就绪后启动插件。
+        logger.info("初始化插件...")
+        plugin_manager, plugin_tools = await startup_plugins()
+
+        app.state.plugin_manager = plugin_manager
+        app.state.plugin_tools = plugin_tools
+
+        logger.info("插件初始化成功")
 
         logger.info("应用启动完成")
         logger.info("=" * 30)
@@ -130,6 +191,10 @@ async def lifespan(app: FastAPI):
         logger.info("应用关闭中...")
 
         # 按初始化的相反顺序释放资源，一个资源失败不阻断其他资源清理。
+        try:
+            await shutdown_plugins(plugin_manager)
+        except Exception:
+            logger.exception("插件关闭失败")
         try:
             await shutdown_redis(redis_client)
         except Exception:

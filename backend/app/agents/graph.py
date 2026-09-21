@@ -50,7 +50,11 @@ async def model_node(
             "pending_action": None,
         }
 
-    model = runtime.context.llm.bind_tools(ServiceToolRegistry.definitions())
+    tools = runtime.context.tools
+    definitions = getattr(tools, "definitions_with_plugins", None)
+    model = runtime.context.llm.bind_tools(
+        definitions() if definitions is not None else ServiceToolRegistry.definitions()
+    )
     system = SystemMessage(
         content=prompt_with_task(state.get("active_tool"), state.get("slots", {}))
     )
@@ -84,7 +88,11 @@ async def validate_tool_node(
         for extra in last.tool_calls[1:]
     ]
     try:
-        normalized, missing = ServiceToolRegistry.validate(name, merged)
+        validate = getattr(runtime.context.tools, "validate_with_plugins", None)
+        if validate is None:
+            normalized, missing = ServiceToolRegistry.validate(name, merged)
+        else:
+            normalized, missing = validate(name, merged)
     except ToolValidationFailure as exc:
         return {
             "messages": [
@@ -108,7 +116,13 @@ async def validate_tool_node(
         "missing_slots": missing,
         "approval_decision": None,
     }
-    if not missing and ServiceToolRegistry.is_write(name):
+    is_write = getattr(runtime.context.tools, "is_write_with_plugins", None)
+    write_tool = (
+        is_write(name)
+        if is_write is not None
+        else ServiceToolRegistry.is_write(name)
+    )
+    if not missing and write_tool:
         try:
             confirmation = await runtime.context.tools.prepare_confirmation(
                 name,

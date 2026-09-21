@@ -4,15 +4,19 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
+from app.core.lifespan import shutdown_plugins, startup_plugins
 from app.agents.graph import build_service_agent
 from app.agents.runtime import AgentRuntimeContext
+from app.tools.service_tools import ServiceToolRegistry
 
 
 class FakeModel:
     def __init__(self, responses):
         self.responses = list(responses)
+        self.bound_tools = None
 
-    def bind_tools(self, _tools):
+    def bind_tools(self, tools):
+        self.bound_tools = tools
         return self
 
     async def ainvoke(self, _messages):
@@ -198,6 +202,40 @@ class AgentGraphTests(unittest.IsolatedAsyncioTestCase):
             result["messages"][-1].content,
             "商品服务暂时不可用，请稍后重试。",
         )
+
+    async def test_agent_can_call_a_plugin_tool(self):
+        plugin_manager, plugin_tools = await startup_plugins()
+        try:
+            model = FakeModel([
+                tool_call("get_customer_service_hours", {}),
+                AIMessage(content="人工客服工作时间是周一至周五 09:00-18:00。"),
+            ])
+            tools = ServiceToolRegistry(
+                catalog_service=object(),
+                address_service=object(),
+                order_service=object(),
+                plugin_tools=plugin_tools,
+            )
+            context = AgentRuntimeContext("user-001", model, tools)
+            graph = build_service_agent(InMemorySaver())
+            config = {"configurable": {"thread_id": "user-001:plugin"}}
+
+            result = await graph.ainvoke(
+                {"messages": [HumanMessage(content="人工客服几点上班？")]},
+                config=config,
+                context=context,
+            )
+
+            self.assertIn(
+                "get_customer_service_hours",
+                [item["function"]["name"] for item in model.bound_tools],
+            )
+            self.assertEqual(
+                result["messages"][-1].content,
+                "人工客服工作时间是周一至周五 09:00-18:00。",
+            )
+        finally:
+            await shutdown_plugins(plugin_manager)
 
 
 if __name__ == "__main__":

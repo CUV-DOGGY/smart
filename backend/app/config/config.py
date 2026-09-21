@@ -1,4 +1,5 @@
 import ipaddress
+from datetime import time
 from pathlib import Path
 
 from pydantic import Field, SecretStr, field_validator
@@ -27,6 +28,14 @@ class Settings(BaseSettings):
     # Agent execution boundaries
     AGENT_RUN_TIMEOUT_SECONDS: int = Field(default=90, ge=10, le=300)
     AGENT_LOCK_LEASE_SECONDS: int = Field(default=120, ge=30, le=600)
+
+    # 人工客服营业时间插件。星期使用 Python 约定：0=周一，6=周日。
+    BUSINESS_HOURS_TIMEZONE: str = "Asia/Shanghai"
+    BUSINESS_HOURS_DAYS: list[int] = Field(
+        default_factory=lambda: [0, 1, 2, 3, 4]
+    )
+    BUSINESS_HOURS_OPEN_TIME: time = time(9, 0)
+    BUSINESS_HOURS_CLOSE_TIME: time = time(18, 0)
 
     # 高德 Web 服务
     AMAP_WEB_SERVICE_KEY: SecretStr

@@ -76,6 +76,7 @@ def get_agent_chat_service(
         catalog_service=catalog_service,
         address_service=address_service,
         order_service=order_service,
+        plugin_tools=request.app.state.plugin_tools,
     )
     runtime = AgentRuntimeContext(user_id="", llm=request.app.state.llm, tools=tools)
     return AgentChatService(
